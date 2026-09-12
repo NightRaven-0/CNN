@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import random
 import sys
 import time
@@ -102,7 +103,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-pretrained", action="store_true", help="random init, downloads nothing")
     p.add_argument("--allow-missing", action="store_true", help="skip absent images (smoke tests)")
     p.add_argument("--limit", type=int, default=0, help="cap images per split (smoke tests)")
+    p.add_argument("--fresh", action="store_true", help="ignore any last.pt and start over")
     return p.parse_args()
+
+
+def save_atomic(payload: dict, path: Path) -> None:
+    """Write a checkpoint through a temporary file so a crash cannot truncate it.
+
+    A power cut partway through torch.save leaves a half-written file that will
+    not load, which would defeat the point of keeping a resume checkpoint.
+    """
+    tmp = path.with_name(path.name + ".tmp")
+    torch.save(payload, tmp)
+    os.replace(tmp, path)
 
 
 def main() -> int:
@@ -162,9 +175,30 @@ def main() -> int:
     )
 
     checkpoint = args.out / "best.pt"
+    resume_point = args.out / "last.pt"
     history: list[dict[str, float]] = []
-    best, stale = -math.inf, 0
-    for epoch in range(1, args.epochs + 1):
+    best, stale, first_epoch = -math.inf, 0, 1
+
+    # Mains power has interrupted this project three times in a day, so a run
+    # that dies mid-training continues from the last finished epoch rather than
+    # throwing away two hours of GPU time.
+    if resume_point.exists() and not args.fresh:
+        saved = torch.load(resume_point, map_location=device, weights_only=False)
+        model.load_state_dict(saved["model"])
+        optimizer.load_state_dict(saved["optimizer"])
+        scheduler.load_state_dict(saved["scheduler"])
+        best, stale, history = saved["best"], saved["stale"], saved["history"]
+        first_epoch = saved["epoch"] + 1
+        torch.set_rng_state(saved["rng"].cpu())
+        if torch.cuda.is_available() and saved.get("cuda_rng"):
+            torch.cuda.set_rng_state_all([s.cpu() for s in saved["cuda_rng"]])
+        for key in ("epochs", "batch_size", "size"):
+            was, now = saved["args"].get(key), getattr(args, key)
+            if str(was) != str(now):
+                log(f"warning: --{key} was {was} in the interrupted run and is {now} now")
+        log(f"resuming at epoch {first_epoch}, best val AUROC so far {best:.4f}")
+
+    for epoch in range(first_epoch, args.epochs + 1):
         model.train()
         start, running = time.monotonic(), 0.0
         for step, (x, y, _) in enumerate(train_loader, 1):
@@ -194,7 +228,7 @@ def main() -> int:
 
         if val_auc > best or not checkpoint.exists():
             best, stale = (val_auc if not math.isnan(val_auc) else best), 0
-            torch.save(
+            save_atomic(
                 {
                     "model": model.state_dict(),
                     "epoch": epoch,
@@ -205,9 +239,28 @@ def main() -> int:
             )
         else:
             stale += 1
-            if stale >= args.patience:
-                log(f"no improvement for {args.patience} epochs, stopping")
-                break
+
+        # Written every epoch, whether or not the model improved, since this is
+        # what an interrupted run comes back to.
+        save_atomic(
+            {
+                "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(),
+                "epoch": epoch,
+                "best": best,
+                "stale": stale,
+                "history": history,
+                "rng": torch.get_rng_state(),
+                "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
+                "args": {k: str(v) for k, v in vars(args).items()},
+            },
+            resume_point,
+        )
+
+        if stale >= args.patience:
+            log(f"no improvement for {args.patience} epochs, stopping")
+            break
 
     state = torch.load(checkpoint, map_location=device)
     model.load_state_dict(state["model"])
