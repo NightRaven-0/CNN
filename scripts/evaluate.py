@@ -115,9 +115,12 @@ def main() -> int:
 
     print(table.to_string(index=False))
     log(f"mean AUROC {mean_auroc:.4f}")
-    for name, value in sorted(PUBLISHED.items(), key=lambda kv: kv[1]):
-        marker = "<-- ours sits here" if value <= mean_auroc else ""
-        log(f"  published {value:.3f}  {name} {marker}")
+    # Print this run in its place among the published numbers, so the ranking
+    # reads at a glance instead of marking every row we happen to beat.
+    ranked = [(value, f"published   {name}") for name, value in PUBLISHED.items()]
+    ranked.append((mean_auroc, ">>> THIS RUN (DenseNet-121, official split)"))
+    for value, label in sorted(ranked):
+        log(f"  {value:.4f}  {label}")
     return 0
 
 

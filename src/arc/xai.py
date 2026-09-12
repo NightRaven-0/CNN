@@ -132,6 +132,20 @@ def _reinitialise(module: nn.Module, generator: torch.Generator) -> None:
             else:
                 param.fill_(1.0)
 
+    # A BatchNorm holds its running statistics as buffers, not parameters, so the
+    # loop above never touches them. In eval mode those trained statistics
+    # normalise activations that the randomised convolutions now produce, the
+    # scale diverges, and across 121 layers it overflows to inf so every map
+    # returns NaN. Reset the statistics along with the weights.
+    if isinstance(module, nn.modules.batchnorm._BatchNorm):
+        with torch.no_grad():
+            if module.running_mean is not None:
+                module.running_mean.zero_()
+            if module.running_var is not None:
+                module.running_var.fill_(1.0)
+            if module.num_batches_tracked is not None:
+                module.num_batches_tracked.zero_()
+
 
 def cascading_randomisation(
     model,
@@ -167,11 +181,25 @@ def cascading_randomisation(
     results: list[tuple[str, float, float]] = []
     for name, module in reversed(named):
         _reinitialise(module, generator)
-        maps = explain(scratch, images, class_index).reshape(images.shape[0], -1)
+        try:
+            maps = explain(scratch, images, class_index).reshape(images.shape[0], -1)
+        except Exception as exc:
+            # EigenCAM takes an SVD of the activations, and randomised weights can
+            # make it degenerate or non-finite so the decomposition fails to
+            # converge. That a method breaks down under randomisation is itself
+            # worth recording, so note it and carry on down the network.
+            results.append((f"{name} [failed: {type(exc).__name__}]", float("nan"), 1.0))
+            continue
 
         rhos: list[float] = []
         flat = 0
         for i in range(images.shape[0]):
+            if not (np.isfinite(maps[i]).all() and np.isfinite(reference[i]).all()):
+                # The map came back with NaN or inf in it. That is the method
+                # breaking down, not agreeing with anything, and it counts as
+                # unusable rather than being dropped silently.
+                flat += 1
+                continue
             if float(maps[i].std()) == 0.0 or float(reference[i].std()) == 0.0:
                 flat += 1
                 continue

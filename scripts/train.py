@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import gc
 import math
 import os
 import random
@@ -71,7 +72,21 @@ def predict(
     return torch.cat(targets).numpy(), torch.cat(probs).numpy()
 
 
-def make_loader(ds: Dataset, *, batch_size: int, workers: int, train: bool) -> DataLoader:
+def make_loader(
+    ds: Dataset,
+    *,
+    batch_size: int,
+    workers: int,
+    train: bool,
+    persistent: bool | None = None,
+    prefetch: int = 4,
+) -> DataLoader:
+    """Build a loader. ``persistent`` defaults to keeping workers alive.
+
+    Persistent workers are worth it for loaders used every epoch, but each one
+    holds its worker processes and their prefetch buffers for as long as the
+    loader is referenced. A loader used once should set ``persistent=False``.
+    """
     return DataLoader(
         ds,
         batch_size=batch_size,
@@ -81,8 +96,8 @@ def make_loader(ds: Dataset, *, batch_size: int, workers: int, train: bool) -> D
         pin_memory=True,
         # Windows starts workers by spawning fresh processes, which is slow, so
         # keep them alive between epochs.
-        persistent_workers=workers > 0,
-        prefetch_factor=4 if workers > 0 else None,
+        persistent_workers=(workers > 0) if persistent is None else (persistent and workers > 0),
+        prefetch_factor=prefetch if workers > 0 else None,
     )
 
 
@@ -262,10 +277,25 @@ def main() -> int:
             log(f"no improvement for {args.patience} epochs, stopping")
             break
 
+    # Every persistent loader keeps its workers, and their prefetch buffers, for
+    # as long as it is referenced. Training, validation and test loaders alive at
+    # once meant 24 worker processes holding 512px batches, which exhausted the
+    # system commit limit and wedged the run after training finished. Release the
+    # first two before building the third.
+    del train_loader, val_loader
+    gc.collect()
+
     state = torch.load(checkpoint, map_location=device)
     model.load_state_dict(state["model"])
     test_ds = ChestXray14(frames["test"], args.images, build_transforms(args.size, train=False))
-    test_loader = make_loader(test_ds, batch_size=args.batch_size * 2, workers=args.workers, train=False)
+    test_loader = make_loader(
+        test_ds,
+        batch_size=args.batch_size * 2,
+        workers=min(args.workers, 4),
+        train=False,
+        persistent=False,
+        prefetch=2,
+    )
     y_test, p_test = predict(model, test_loader, device, amp_dtype)
     test_scores = per_class_auroc(y_test, p_test)
 

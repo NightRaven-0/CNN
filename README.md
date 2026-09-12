@@ -2,11 +2,11 @@
 
 Prepared by: [team names]
 For: [mentor name]
-Status: plan settled, data download next
+Status: trained and evaluated, results below
 
 ## What this is
 
-This is the plan for the model and experiments we're building for our mentor's paper. Our part is the working system: a trained classifier, an explanation layer on top of it, and a set of results that can sit next to published work. The writing, the framing and the choice of venue belong to our mentor. Anything below can change once the first results are in, and some parts are already marked as "later".
+This is the model and experiments we built for our mentor's paper, and the numbers they produced. Our part was the working system: a trained classifier, an explanation layer on top of it, and results that sit beside published work. The writing, the framing and the choice of venue belong to our mentor. Anything below can change, and some parts are already marked as "later".
 
 The priorities, in order:
 
@@ -75,11 +75,85 @@ Published mean AUROC on the official test split:
 | Wang et al. 2017 | 0.745 | original baseline, ResNet-50 |
 | Yao et al. 2017 | 0.761 | |
 | Baltruschat et al. 2019 | 0.806 | ResNet-38 using image plus patient age, sex and view position |
-| arXiv:2404.18933 (2024) | 0.812 and 0.824 | DenseNet-121, baseline and improved version |
+| arXiv:2404.18933 (2024) | 0.812 | DenseNet-121 |
+| **this project** | **0.816** | DenseNet-121 at 512 px |
+| arXiv:2404.18933 (2024) | 0.824 | DenseNet-121 with their method |
 
-For a first working model we're aiming for a mean AUROC of about 0.80 to 0.82 on the official split. That's the same range as recent DenseNet-121 results, which is a fair reading of "comparable".
+We measured 0.8158. It sits above four of the five published figures and below the best one, which is what we meant by comparable.
 
 There's one trap here. CheXNet's often-quoted 0.841 was measured on its own random 70/10/20 split, not on the official one. Baltruschat et al. showed that the choice of split alone shifts results noticeably. That number shouldn't go in the same table as official-split results unless the difference is stated.
+
+## Results
+
+Run on 12 September 2026. DenseNet-121 at 512 px, batch 32, early stopping at epoch 7 with the best weights from epoch 4. Validation mean AUROC 0.8533, test mean AUROC 0.8158 across all 25,596 official test images.
+
+### Classification
+
+Mean AUROC 0.8158, mean AUPRC 0.2878. Per-class figures with 95% bootstrap intervals are in `runs/densenet121_512/test_metrics_per_class.csv`. The distance between the two measures is the part worth reading:
+
+| finding | prevalence | AUROC | AUPRC |
+|---|---|---|---|
+| Effusion | 18.2% | 0.830 | 0.511 |
+| Emphysema | 4.3% | 0.937 | 0.451 |
+| Consolidation | 7.1% | 0.741 | 0.160 |
+| Fibrosis | 1.7% | 0.841 | 0.113 |
+| Pneumonia | 2.2% | 0.711 | 0.048 |
+
+Pneumonia scores 0.711 by AUROC and 0.048 by AUPRC. At that prevalence the model is close to useless for it in practice, and a table carrying only AUROC would hide the fact entirely.
+
+### Do the explanations point where the radiologists did
+
+Scored over the 984 image and finding pairs that carry hand-drawn boxes. All of them fall in the test split, so no box was seen during training.
+
+| method | pointing game | IoU | T(IoBB) 0.1 | 0.25 | 0.5 |
+|---|---|---|---|---|---|
+| Grad-CAM++ | 0.544 | 0.212 | 0.685 | 0.550 | 0.376 |
+| Grad-CAM | 0.496 | 0.182 | 0.617 | 0.500 | 0.337 |
+| CAM | 0.493 | 0.177 | 0.607 | 0.498 | 0.336 |
+| EigenCAM | 0.479 | 0.190 | 0.629 | 0.504 | 0.319 |
+| random control | 0.228 | 0.091 | 0.371 | 0.261 | 0.131 |
+
+Every method roughly doubles the random control, so the measure is not one that anything can pass.
+
+The spread between findings is far wider than the spread between methods:
+
+| finding | CAM pointing | CAM T(IoBB) 0.5 | random pointing |
+|---|---|---|---|
+| Cardiomegaly | 0.870 | 0.815 | 0.349 |
+| Nodule | 0.203 | 0.000 | 0.114 |
+
+Nodules are the clear failure. Across all 79 boxed nodule cases, no method ever produced a box overlapping the radiologist's by half its own area. Cardiomegaly, which is large and sits in the same place every time, is localised well by everything. That reproduces Arun et al. (2021) on a dataset they did not use: saliency handles big stereotyped findings and fails on small ones.
+
+### Are the explanations faithful to the model
+
+Deletion blanks the pixels a map ranks highest and watches the score fall, so low is good. Insertion adds them to an empty image, so high is good. Fifty images per method.
+
+| method | deletion | insertion | difference |
+|---|---|---|---|
+| Grad-CAM | 0.194 | 0.624 | 0.431 |
+| CAM | 0.198 | 0.628 | 0.430 |
+| Grad-CAM++ | 0.212 | 0.603 | 0.391 |
+| EigenCAM | 0.264 | 0.570 | 0.306 |
+| random control | 0.338 | 0.371 | 0.033 |
+
+### Do they depend on the model at all
+
+Randomise the network from the output backwards and watch whether the map moves. Mean absolute rank correlation over the last 20 of 242 layers, where close to zero is the answer we want.
+
+| method | mean absolute correlation |
+|---|---|
+| CAM | 0.010 |
+| Grad-CAM | 0.052 |
+| EigenCAM | 0.152 |
+| Grad-CAM++ | 0.199 |
+
+All four pass, in that the correlation collapses instead of holding near one.
+
+### The three rankings disagree
+
+Grad-CAM++ localises best and has the weakest sanity result. Grad-CAM and plain CAM are the most faithful and the least dependent on the image, while localising a little worse. EigenCAM loses on two of the three and its SVD failed to converge under randomisation, which we had to handle rather than repair.
+
+No method wins on everything. A paper quoting one number for one method is therefore picking its own answer, and that is the argument for measuring all three properties instead of one.
 
 ## Decisions and trade-offs
 
@@ -122,7 +196,7 @@ A heatmap shows where the model looked. It doesn't show whether the model reason
 
 ## Where the code stands
 
-Written and tested so far (35 tests passing):
+Written and tested (40 tests passing), and run end to end:
 
 - data splitting by patient, with a check that fails loudly if a patient ever lands in two splits
 - loading of the NIH labels, the official split and the boxes, checked against the real files

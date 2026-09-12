@@ -134,9 +134,24 @@ def main() -> int:
     sanity: list[dict[str, object]] = []
     for method in args.methods:
         started = time.perf_counter()
-        trace = cascading_randomisation(
-            model, batch, LABELS.index(sample[0][1]), method=method, seed=args.seed
-        )
+        try:
+            trace = cascading_randomisation(
+                model, batch, LABELS.index(sample[0][1]), method=method, seed=args.seed
+            )
+        except Exception as exc:
+            # EigenCAM's SVD can fail to converge on randomised activations. One
+            # method breaking should cost that method's row, not the whole table.
+            log(f"{method}: randomisation failed ({type(exc).__name__}: {exc}); skipping")
+            sanity.append(
+                {
+                    "method": method,
+                    "layers": 0,
+                    "mean_abs_rho_last20": float("nan"),
+                    "flat_fraction_last20": float("nan"),
+                    "flat_fraction_all": float("nan"),
+                }
+            )
+            continue
         tail = trace[-20:]
         rhos = [rho for _, rho, _ in tail if rho == rho]
         sanity.append(
