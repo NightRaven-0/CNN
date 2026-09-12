@@ -1,110 +1,154 @@
-# Teaching a chest X-ray CNN to say *where*, and then checking whether it's telling the truth
+# Explainable CNN for Chest X-ray Diagnosis: Project Brief
 
-**Project proposal — undergraduate thesis / capstone**
-Dataset: VinDr-CXR · Hardware: single RTX 5070 Ti (16 GB) · Framework: PyTorch 2.11 / CUDA 12.8
+Prepared by: [team names]
+For: [mentor name]
+Status: plan settled, data download next
 
----
+## What this is
 
-## The short version
+This is the plan for the model and experiments we're building for our mentor's paper. Our part is the working system: a trained classifier, an explanation layer on top of it, and a set of results that can sit next to published work. The writing, the framing and the choice of venue belong to our mentor. Anything below can change once the first results are in, and some parts are already marked as "later".
 
-We're training a CNN on chest radiographs to do two things at once: name the abnormality, and name the part of the chest it's in. Then we compare it against the standard approach, which is to train a plain classifier and afterwards run Grad-CAM over it to guess what the model was looking at.
+The priorities, in order:
 
-The question we want to answer is whether asking a model to localise *during training* produces better explanations than interrogating a black box *after* training, and what that costs in accuracy. VinDr-CXR ships with bounding boxes drawn by radiologists, so we can grade both approaches against a real answer key instead of squinting at heatmaps and deciding they look about right.
+1. **Explainability.** For every prediction the system shows which part of the X-ray drove it. We also measure how far those explanations can be trusted, instead of only displaying them.
+2. **Localisation.** The same explanation maps are turned into boxes and anatomical zones ("right lower zone") and scored against boxes drawn by radiologists.
 
-That last part is the whole point. Most papers in this area stop at "here is a heatmap, it looks plausible." We want a number.
+## Dataset: NIH ChestX-ray14
 
-## Why not just do the normal thing
+112,120 frontal chest X-rays from 30,805 patients, released by the NIH Clinical Center. Each image has up to 14 disease labels, or "No Finding". The images are 1024×1024 PNG files, about 45 GB in total.
 
-The normal thing is: fine-tune a DenseNet or a ResNet on a public chest X-ray set, report AUROC per finding, generate Grad-CAM overlays, write "the model attends to clinically relevant regions," submit. There are hundreds of these. It's a fine exercise and a weak paper, and the reason it's weak isn't just saturation. The evidence says the heatmaps often aren't trustworthy:
+We picked it for three reasons.
 
-- Arun and colleagues (*Radiology: AI*, 2021) scored saliency maps on chest X-ray localisation and found several popular methods lost to a dumb baseline that just draws a box where the finding usually is.
-- Adebayo's sanity-check paper (NeurIPS 2018) showed that some saliency methods produce nearly the same picture after you randomise the model's weights, which means they're partly just edge detectors wearing a lab coat.
-- DeGrave et al. (*Nature Machine Intelligence*, 2021) found COVID classifiers keying off laterality markers and image borders while the saliency maps still looked reasonable.
+It comes with an official patient-wise split: 86,524 images for training and validation, 25,596 for testing. Using that split is the only way our numbers can be compared directly with published ones.
 
-So "add explainability" as a final step is not a contribution. Building a model whose spatial reasoning is an output you can grade, and then actually grading it, is.
+The release also includes 984 hand-drawn bounding boxes on 880 images, covering 8 of the 14 classes, and every one of those images is in the official test list. That's small. Still, since the boxes never touch training, they give us an independent answer key for grading the explanations.
 
-## What we settled on, and what we dropped
+And we can start today. NIH places no restrictions on use. The only conditions are attribution: link to the NIH download page, cite Wang et al. (CVPR 2017), and acknowledge the NIH Clinical Center as the data provider. There's no account or data-use agreement involved.
 
-The first version of this proposal had a router: a gate that segments the chest into anatomical regions and dispatches each one to its own specialist CNN. Four experts, one for lung parenchyma, one for pleura, one for mediastinum, one for the skeleton. It's a nice idea and it matches the "localised, area-specific" framing we started from.
+The downsides are real. The labels were extracted from radiology reports by a text-mining tool, so some of them are wrong, and every paper on this dataset inherits that problem. The boxes only cover 8 classes and about a thousand images, so explanation scores can only be computed for those. Every image comes from the same hospital.
 
-We're not doing it, at least not as the main contribution. Three reasons.
+Our first plan used VinDr-CXR, which has cleaner labels and many more boxes. We moved away from it for now because few published classification results exist on a fixed VinDr split, so there'd be little to compare against, and getting access means signing agreements through Kaggle or PhysioNet. It stays on the list as a second test set.
 
-VinDr has no anatomy segmentations, so we'd have to bolt on a separate lung-field model and inherit its errors. The rare findings get worse, not better: rib fracture is well under 1% prevalence, and splitting an already-thin class across a dedicated head that sees almost nothing is a good way to learn nothing. And most importantly, we couldn't articulate why routing would improve classification accuracy over a backbone that already encodes position. It's a lot of machinery for an uncertain payoff, which is a bad trade when there's one person and one GPU.
+## Model
 
-What replaces it keeps the useful part. A single ConvNeXt-Tiny backbone with two heads:
+DenseNet-121 pretrained on ImageNet, with 14 sigmoid outputs, one per disease. CheXNet used this architecture, and it's the most common baseline on this dataset, so our numbers will be easy to place.
 
-- **Finding head** — 14 abnormality labels, multi-label.
-- **Zone head** — which anatomical zone contains the finding. Six lung zones (left and right, upper/middle/lower) plus mediastinum and skeletal periphery.
+One change from CheXNet: we train on 512×512 images instead of 224×224. The explanation maps come from the last convolutional layer, which is a 7×7 grid at 224 and a 16×16 grid at 512. A 7×7 grid is too coarse to point at a nodule. The larger size costs about five times the compute per image, and our GPU (RTX 5070 Ti, 16 GB) can handle it.
 
-The zone labels cost nothing extra. They fall out of the bounding boxes VinDr already provides. And the output reads the way a radiology report reads: *consolidation, right lower zone*, rather than a blurry orange blob.
+Class imbalance is handled with a weighted loss. Hernia, for example, appears in well under 1% of images.
 
-The router isn't dead, it's just demoted to an optional third arm if the core work finishes early.
+## Explanation layer
 
-## Trade-offs, honestly
+This is the main part of the project. We run six explanation methods on the same trained model:
 
-| Decision | What we get | What it costs |
+- CAM, the original class activation map. For this architecture it adds up exactly to the model's prediction, so it is a decomposition of the answer rather than an estimate of it, and it costs nothing extra to compute.
+- Grad-CAM and Grad-CAM++, gradient-weighted activation maps and the usual choice in medical imaging papers
+- Score-CAM, the same idea without gradients. It needs one pass per channel and the last block has 1024 of them, so it runs on a subsample rather than the whole test set.
+- Integrated Gradients, a pixel-level method that adds up gradients along a path from a blank image to the real one
+- Occlusion, which hides patches of the image and watches how the prediction changes
+- A random map, as a control. Any score a random map also earns is not evidence of anything, and we would rather find that out ourselves than have a reviewer find it.
+
+The methods rest on different assumptions, which is why we run several. If they agree, that agreement counts as evidence. If they disagree, that's reported as well.
+
+Each method is scored three ways.
+
+*Does it point at the right place?* We use the pointing game (does the hottest spot on the map fall inside a radiologist's box) and the overlap (IoU) between the map and the box.
+
+*Is it faithful to the model?* We use deletion and insertion curves (Petsiuk et al., 2018). Remove the pixels the map ranks as most important and see how quickly the prediction falls. A good ranking should make it fall fast.
+
+*Does it depend on the model at all?* We use the model-randomisation test from Adebayo et al. (2018). Randomise the network's weights layer by layer and check whether the maps change. If they stay the same, the method was tracing edges in the image and wasn't explaining the model.
+
+We do all this because heatmaps in medical imaging are often less reliable than they look. Arun et al. (2021) tested eight saliency methods on chest X-ray localisation. All eight failed at least one of their trust tests, and all eight localised worse than models trained specifically for it (a U-Net and a RetinaNet). DeGrave et al. (2021) showed COVID-19 classifiers leaning on shortcuts such as text markers and patient positioning rather than on the lungs. A heatmap on its own proves very little. What we're adding is the measurement.
+
+## Localisation
+
+This is the second priority, and most of it comes out of the explanation layer. Each heatmap is thresholded into a box and compared with the radiologist boxes using the measure Wang et al. used themselves, T(IoBB), at thresholds of 0.1, 0.25 and 0.5. Their numbers are our baseline. At the loosest threshold their accuracy ran from 0.99 for cardiomegaly down to 0.16 for nodules.
+
+Boxes are also mapped onto six lung zones plus the mediastinum, so the output reads the way a report would.
+
+## What "comparable results" means
+
+Published mean AUROC on the official test split:
+
+| Work | Mean AUROC | Notes |
 |---|---|---|
-| VinDr-CXR over CheXpert / NIH ChestX-ray14 | Radiologist-drawn boxes, and labels read by humans rather than scraped out of reports by an NLP tool | Smaller (18k vs 220k+), and access takes paperwork |
-| ConvNeXt-Tiny backbone | Modern, ~28M params, trains overnight on 16 GB | Less directly comparable to the older DenseNet-121 literature, so we run that as a second baseline |
-| Zone head instead of expert router | Same anatomical grounding, a tenth of the machinery, labels are free | Less novel-sounding on paper; we lose the "system of specialists" story |
-| Zone classification instead of box regression | No detection framework to build or tune, weak supervision is enough | Coarser localisation. We can say "right lower zone", not "this 3 cm nodule" |
-| 1024 px resized images | Fits on disk (~15–20 GB vs ~190 GB of DICOM), trains fast | Small nodules and subtle pneumothoraces may be lost in downsampling. This is a real limitation and we'll say so |
-| Single dataset | Achievable | No cross-institution validation unless we add CheXlocalize later, which we'd like to |
+| Wang et al. 2017 | 0.745 | original baseline, ResNet-50 |
+| Yao et al. 2017 | 0.761 | |
+| Baltruschat et al. 2019 | 0.806 | ResNet-38 using image plus patient age, sex and view position |
+| arXiv:2404.18933 (2024) | 0.812 and 0.824 | DenseNet-121, baseline and improved version |
 
-## Where the novelty actually is
+For a first working model we're aiming for a mean AUROC of about 0.80 to 0.82 on the official split. That's the same range as recent DenseNet-121 results, which is a fair reading of "comparable".
 
-Three things, roughly in order of how confident we are about them.
+There's one trap here. CheXNet's often-quoted 0.841 was measured on its own random 70/10/20 split, not on the official one. Baltruschat et al. showed that the choice of split alone shifts results noticeably. That number shouldn't go in the same table as official-split results unless the difference is stated.
 
-**We're measuring explanations instead of displaying them.** Pointing game (does the model's peak fall inside the radiologist's box), IoU against those boxes, and zone-hit rate. Plus a deletion/insertion faithfulness test, and the Adebayo randomisation check on every method we report, including our own. Very few student projects in this space run that last one, and it's cheap.
+## Decisions and trade-offs
 
-**We're testing a specific claim rather than building a demo.** The claim is that supervised localisation beats post-hoc attribution on the same backbone with the same data, and that the accuracy penalty is small. It might turn out to be false. That's fine, and honestly a negative result here is more useful than another 0.94 AUROC.
+| Decision | What we gain | What it costs |
+|---|---|---|
+| NIH ChestX-ray14 over VinDr-CXR | Official split, many published baselines, no access paperwork | Noisier labels, far fewer boxes |
+| DenseNet-121 | Direct comparison with CheXNet-style work | Not the strongest backbone around today |
+| 512 px input | 16×16 explanation maps instead of 7×7 | About 5 times the compute per image, and a departure from CheXNet's 224 |
+| Six explanation methods | Agreement between methods becomes evidence, and one weak method can't sink the result | More compute, and more to explain in the paper |
+| Post-hoc explanations first | Works on any trained model, and matches most published work | The explanation is worked out afterwards, not built into the model |
+| Official split only | Our numbers line up with the literature | No freedom to pick a friendlier split, which is the whole reason for using it |
 
-**The explanation is in clinical vocabulary.** Anatomical zones are how findings get described in reports. A heatmap isn't. This is a smaller point but it's the one a clinician would care about.
+## How this differs from a typical student project
 
-## Scope, in three tiers
+Most projects like this train a classifier and add a few Grad-CAM pictures at the end. We score the explanations against radiologist boxes, test whether they're faithful to the model, and run the randomisation check that most papers skip. The classification numbers are on the official split, so they can sit next to published work without the CheXNet split problem. When an explanation method fails, we say so and show examples.
 
-We are deliberately not trying to do everything.
+## Known limitations
 
-**Core — this is the thesis.**
-1. Baseline: DenseNet-121, 14-label classification. Get into the published ballpark so the numbers are credible.
-2. Grad-CAM over that baseline, scored against boxes. Reproduces and extends the Arun result on VinDr.
-3. Ours: ConvNeXt-T with the zone head. Same classification metrics, plus localisation.
-4. Sanity check both.
-5. Write it up, including whatever didn't work.
+The labels are text-mined and some are wrong. We can't fix that, only state it.
 
-**If there's time.**
-6. Per-zone specialist heads — the router idea, run as an ablation to see whether it earns its cost.
-7. External validation on CheXlocalize, which has expert segmentations over CheXpert. Different hospital, different scanners. This is the single best test of whether the model learned anatomy or learned the dataset.
+Explanation scores exist only for the 8 classes that have boxes.
 
-**Probably not.**
-8. A Faster R-CNN / YOLO detection baseline. It's a whole project by itself.
+All the data is from one hospital, so we have no evidence yet that the model works elsewhere. Zech et al. (2018) showed that chest X-ray models can lose a lot of accuracy at a new hospital.
 
-## Things that could go wrong
+A heatmap shows where the model looked. It doesn't show whether the model reasoned the way a radiologist would. None of this is clinical validation, and the system isn't meant for diagnosis.
 
-*The zone head might not help.* Possible. If so, we report it, and the thesis becomes "we tested whether supervised localisation improves explanation quality on chest radiographs, and it didn't, and here's what that suggests." Still a result.
+## Later, after the first results
 
-*The ground truth disagrees with itself.* Each VinDr image was read by 3 radiologists out of a pool of 17, and they don't always agree on where a finding is. We'll need a box-fusion rule and we should report inter-reader agreement, because the model can't beat the noise ceiling and knowing the ceiling stops us overclaiming.
+- Explanations built into the model itself, either with an attention-pooling head or with a prototype network that says "this region looks like these training cases"
+- A test set from a second hospital, such as VinDr-CXR or CheXlocalize
+- A newer backbone such as ConvNeXt, and higher resolution
+- A radiologist rating a sample of the explanations
 
-*Rare findings may be unlearnable.* At 18k images, some classes have a few dozen positives. We're reporting per-class rather than hiding behind a macro average, and any class we can't evaluate gets excluded from the headline number and named in the text.
+## Questions for our mentor
 
-*Downsampling could hide the findings we most care about.* Small nodules especially. A high-resolution confirmation run on a subset is the mitigation.
+1. Which venue or format do you have in mind? That decides how many extra experiments are worth running.
+2. Should the first version include a test set from a second hospital, or should that wait for a follow-up?
+3. Is 512 px fine, or should we also report a 224 px run so the comparison with CheXNet is exact?
+4. Does the department need any ethics paperwork, even for public, de-identified data?
 
-## Reporting
+## Where the code stands
 
-We're filling in the CLAIM checklist (Checklist for Artificial Intelligence in Medical Imaging) as we go rather than at the end. It's what reviewers in this field expect and it forces us to write down decisions while we still remember making them.
+Written and tested so far (35 tests passing):
 
-## Repository
+- data splitting by patient, with a check that fails loudly if a patient ever lands in two splits
+- loading of the NIH labels, the official split and the boxes, checked against the real files
+- the DenseNet-121 model, whose class activation maps add up exactly to its predictions
+- the six explanation methods, and the scoring that grades them against the boxes
+- scripts that download, preprocess, train, and produce the three results tables: classification scores, localisation against the boxes, and faithfulness alongside the sanity check
 
-```
-src/arc/
-  zones.py      anatomical taxonomy, finding -> region mapping
-  splits.py     patient-level stratified splitting + leakage checks
-  data.py       (next) dataset, box fusion, zone label derivation
-  models/       (next) backbone, heads, baselines
-  evaluate.py   (next) classification, localisation, faithfulness
-tests/          currently 8 tests, all on the splitter
-paper/          manuscript, figures, CLAIM checklist
-data/           gitignored
-```
+Measured on this machine rather than estimated: training at batch size 32 on 512 px images uses about 11 GB of the GPU's 16 GB and runs at 165 images per second, which is roughly 8.5 minutes per epoch. At most 12 epochs with early stopping puts a full run under two hours. The data download is still going, and training starts once all 112,120 images are on disk.
 
-The splitter came first on purpose. Splitting on rows instead of on patients is the quiet mistake that invalidates a whole study, so it's written, tested, and asserted before every training run rather than trusted.
+## References
+
+Please check each one against the original before it goes into the paper.
+
+- Adebayo J, Gilmer J, Muelly M, Goodfellow I, Hardt M, Kim B. Sanity checks for saliency maps. NeurIPS 2018.
+- Arun N, et al. Assessing the trustworthiness of saliency maps for localizing abnormalities in medical imaging. Radiology: Artificial Intelligence, 2021.
+- Baltruschat IM, Nickisch H, Grass M, Knopp T, Saalbach A. Comparison of deep learning approaches for multi-label chest X-ray classification. Scientific Reports, 2019.
+- Chattopadhay A, et al. Grad-CAM++: Generalized gradient-based visual explanations for deep convolutional networks. WACV 2018.
+- DeGrave AJ, Janizek JD, Lee SI. AI for radiographic COVID-19 detection selects shortcuts over signal. Nature Machine Intelligence, 2021.
+- Huang G, Liu Z, van der Maaten L, Weinberger KQ. Densely connected convolutional networks. CVPR 2017.
+- Learning low-rank feature for thorax disease classification. arXiv:2404.18933, 2024.
+- Petsiuk V, Das A, Saenko K. RISE: Randomized input sampling for explanation of black-box models. BMVC 2018.
+- Rajpurkar P, et al. CheXNet: Radiologist-level pneumonia detection on chest X-rays with deep learning. arXiv:1711.05225, 2017.
+- Selvaraju RR, et al. Grad-CAM: Visual explanations from deep networks via gradient-based localization. ICCV 2017.
+- Sundararajan M, Taly A, Yan Q. Axiomatic attribution for deep networks. ICML 2017.
+- Wang H, et al. Score-CAM: Score-weighted visual explanations for convolutional neural networks. CVPR Workshops 2020.
+- Wang X, Peng Y, Lu L, Lu Z, Bagheri M, Summers RM. ChestX-ray8: Hospital-scale chest X-ray database and benchmarks on weakly-supervised classification and localization of common thorax diseases. CVPR 2017.
+- Yao L, et al. Learning to diagnose from scratch by exploiting dependencies among labels. arXiv, 2017.
+- Zech JR, et al. Variable generalization performance of a deep learning model to detect pneumonia in chest radiographs: a cross-sectional study. PLOS Medicine, 2018.
+- Zeiler MD, Fergus R. Visualizing and understanding convolutional networks. ECCV 2014.

@@ -1,18 +1,21 @@
-"""Anatomical taxonomy for ARC-CXR.
+"""Anatomical vocabulary for saying where a finding is.
 
-Two levels of locality, deliberately kept separate:
+Localisation is the project's second priority, after explainability, so this
+module does not drive the model. It is the vocabulary the explanation layer uses
+to turn a heatmap into something a radiologist would write: "effusion, left
+lower zone" rather than a coloured blob.
 
-* ``Expert`` (4) — which region-specific head owns a finding. This is the
-  routing target and it is fixed by anatomy, not learned, so a reviewer can
-  audit it against a radiology textbook.
-* ``LungZone`` (6) — the R/L x upper/mid/lower grid used to phrase parenchymal
-  localisation the way a report does ("opacity, right lower zone").
+Two levels:
 
-The finding names below are the VinDr-CXR local-finding labels. They are
-asserted against the real CSV at load time by :func:`validate_against_labels`
-rather than trusted — label sets differ between the PhysioNet release (22
-local findings) and the Kaggle competition subset (14), and silently mapping a
-misspelled class to the wrong expert would corrupt every downstream number.
+* ``Region`` is the anatomical compartment a finding belongs to. Results tables
+  are grouped by it, and it gives a cheap plausibility check on explanations: a
+  cardiomegaly heatmap that peaks in the lung apex is wrong whatever its score.
+* ``LungZone`` is the left/right x upper/middle/lower grid used in reports.
+
+Label names cover NIH ChestX-ray14 (the primary dataset) and VinDr-CXR (kept as
+a possible second evaluation set with better boxes). They are checked against
+the real CSV at load time by :func:`validate_against_labels` instead of being
+trusted, because a misspelt class would silently drop out of every table.
 """
 
 from __future__ import annotations
@@ -20,18 +23,18 @@ from __future__ import annotations
 from enum import Enum
 
 
-class Expert(str, Enum):
-    """Region-specific expert heads."""
+class Region(str, Enum):
+    """Anatomical compartment a finding is primarily located in."""
 
     PARENCHYMA = "parenchyma"
     PLEURA = "pleura"
     MEDIASTINUM = "mediastinum"
     SKELETAL = "skeletal"
-    UNASSIGNED = "unassigned"  # catch-all; routed to every expert, weighted
+    UNASSIGNED = "unassigned"
 
 
 class LungZone(str, Enum):
-    """Spatial zones used for report-style parenchymal localisation."""
+    """Report-style zones for parenchymal and pleural findings."""
 
     RIGHT_UPPER = "right_upper"
     RIGHT_MIDDLE = "right_middle"
@@ -41,88 +44,92 @@ class LungZone(str, Enum):
     LEFT_LOWER = "left_lower"
 
 
-#: Primary expert for each VinDr-CXR local finding.
+#: Primary region for each finding label.
 #:
-#: "Primary" matters: calcification and consolidation can both appear pleurally,
-#: but each finding is assigned to the expert that owns it in the majority of
-#: cases. Multi-expert findings are handled by the router's soft weighting at
-#: inference, not by duplicating labels here.
-FINDING_TO_EXPERT: dict[str, Expert] = {
-    # --- parenchymal ---
-    "Atelectasis": Expert.PARENCHYMA,
-    "Calcification": Expert.PARENCHYMA,
-    "Consolidation": Expert.PARENCHYMA,
-    "Edema": Expert.PARENCHYMA,
-    "Emphysema": Expert.PARENCHYMA,
-    "ILD": Expert.PARENCHYMA,
-    "Infiltration": Expert.PARENCHYMA,
-    "Lung cavity": Expert.PARENCHYMA,
-    "Lung cyst": Expert.PARENCHYMA,
-    "Lung Opacity": Expert.PARENCHYMA,
-    "Nodule/Mass": Expert.PARENCHYMA,
-    "Pulmonary fibrosis": Expert.PARENCHYMA,
-    # --- pleural ---
-    "Pleural effusion": Expert.PLEURA,
-    "Pleural thickening": Expert.PLEURA,
-    "Pneumothorax": Expert.PLEURA,
-    # --- mediastinal / cardiac ---
-    "Aortic enlargement": Expert.MEDIASTINUM,
-    "Cardiomegaly": Expert.MEDIASTINUM,
-    "Enlarged PA": Expert.MEDIASTINUM,
-    "Mediastinal shift": Expert.MEDIASTINUM,
-    # --- skeletal ---
-    "Clavicle fracture": Expert.SKELETAL,
-    "Rib fracture": Expert.SKELETAL,
-    # --- unassignable ---
-    "Other lesion": Expert.UNASSIGNED,
+#: "Primary" because several findings can occur in more than one compartment
+#: (calcification, for one). Each is assigned where it occurs most often, which
+#: is a convention to be stated in the write-up, not a claim about every case.
+FINDING_TO_REGION: dict[str, Region] = {
+    # --- shared by NIH ChestX-ray14 and VinDr-CXR ---
+    "Atelectasis": Region.PARENCHYMA,
+    "Cardiomegaly": Region.MEDIASTINUM,
+    "Consolidation": Region.PARENCHYMA,
+    "Edema": Region.PARENCHYMA,
+    "Emphysema": Region.PARENCHYMA,
+    # --- NIH ChestX-ray14 only ---
+    "Effusion": Region.PLEURA,
+    "Fibrosis": Region.PARENCHYMA,
+    "Hernia": Region.MEDIASTINUM,  # hiatal hernia, retrocardiac on a PA film
+    "Infiltration": Region.PARENCHYMA,
+    "Mass": Region.PARENCHYMA,
+    "Nodule": Region.PARENCHYMA,
+    "Pleural_Thickening": Region.PLEURA,
+    "Pneumonia": Region.PARENCHYMA,
+    "Pneumothorax": Region.PLEURA,
+    # --- VinDr-CXR only ---
+    "Aortic enlargement": Region.MEDIASTINUM,
+    "Calcification": Region.PARENCHYMA,
+    "Clavicle fracture": Region.SKELETAL,
+    "Enlarged PA": Region.MEDIASTINUM,
+    "ILD": Region.PARENCHYMA,
+    "Lung cavity": Region.PARENCHYMA,
+    "Lung cyst": Region.PARENCHYMA,
+    "Lung Opacity": Region.PARENCHYMA,
+    "Mediastinal shift": Region.MEDIASTINUM,
+    "Nodule/Mass": Region.PARENCHYMA,
+    "Other lesion": Region.UNASSIGNED,
+    "Pleural effusion": Region.PLEURA,
+    "Pleural thickening": Region.PLEURA,
+    "Pulmonary fibrosis": Region.PARENCHYMA,
+    "Rib fracture": Region.SKELETAL,
 }
 
-#: Findings that are diffuse by nature. Zone-level localisation metrics are
-#: reported separately for these, because scoring a whole-lung process against a
-#: single bounding box penalises a model that is behaving correctly.
+#: Findings that are spread across the lungs rather than sitting in one place.
+#: Box-based localisation scores are reported separately for these, since
+#: scoring a whole-lung process against one box penalises a correct heatmap.
 DIFFUSE_FINDINGS: frozenset[str] = frozenset(
-    {"Edema", "Emphysema", "ILD", "Pulmonary fibrosis"}
+    {"Edema", "Emphysema", "Fibrosis", "ILD", "Pulmonary fibrosis"}
 )
 
-#: Label present in VinDr for a normal study. Never routed.
-NO_FINDING = "No finding"
+#: The normal-study label. NIH capitalises it differently from VinDr.
+NO_FINDING_LABELS: frozenset[str] = frozenset({"No Finding", "No finding"})
+
+#: Spellings that differ between a dataset's label file and its box file.
+#: The NIH box list is reported to use "Infiltrate" where the label file says
+#: "Infiltration". Anything else that disagrees is caught by
+#: :func:`validate_against_labels` on first load.
+LABEL_ALIASES: dict[str, str] = {"Infiltrate": "Infiltration"}
 
 
-def experts_in_order() -> list[Expert]:
-    """Expert heads in a fixed order, excluding the catch-all."""
-    return [Expert.PARENCHYMA, Expert.PLEURA, Expert.MEDIASTINUM, Expert.SKELETAL]
+def canonical(label: str) -> str:
+    """Normalise a label spelling to the key used in :data:`FINDING_TO_REGION`."""
+    return LABEL_ALIASES.get(label, label)
 
 
-def findings_for(expert: Expert) -> list[str]:
-    """Findings owned by ``expert``, in stable sorted order."""
-    return sorted(name for name, e in FINDING_TO_EXPERT.items() if e is expert)
+def region_of(label: str) -> Region:
+    """Region for ``label``, accepting alias spellings."""
+    return FINDING_TO_REGION[canonical(label)]
 
 
-def expert_index_matrix() -> dict[str, int]:
-    """Map each finding to its expert's index in :func:`experts_in_order`.
-
-    ``Expert.UNASSIGNED`` maps to ``-1``; callers must decide how to weight it.
-    """
-    order = {e: i for i, e in enumerate(experts_in_order())}
-    return {name: order.get(e, -1) for name, e in FINDING_TO_EXPERT.items()}
+def findings_in(region: Region, labels: list[str] | None = None) -> list[str]:
+    """Findings located in ``region``, optionally restricted to ``labels``."""
+    pool = FINDING_TO_REGION if labels is None else [canonical(x) for x in labels]
+    return sorted(name for name in pool if FINDING_TO_REGION.get(name) is region)
 
 
 def validate_against_labels(observed: list[str], *, strict: bool = True) -> list[str]:
-    """Check the taxonomy against the label names actually present in the data.
+    """Check the taxonomy covers every label actually present in the data.
 
-    Returns the list of observed findings that have no expert assignment.
-    Raises when ``strict`` and anything is unmapped — an unmapped finding would
-    otherwise be silently dropped from routing and quietly deflate recall.
+    Returns the observed labels with no region assignment. Raises when
+    ``strict`` and anything is unmapped, since an unmapped finding would be
+    silently left out of every grouped table.
     """
-    known = set(FINDING_TO_EXPERT) | {NO_FINDING}
-    unmapped = sorted(set(observed) - known)
-    unused = sorted(known - set(observed) - {NO_FINDING})
-
+    known = set(FINDING_TO_REGION) | NO_FINDING_LABELS
+    unmapped = sorted({canonical(x) for x in observed} - known)
     if unmapped and strict:
         raise ValueError(
-            f"{len(unmapped)} finding(s) in the data have no expert assignment: "
-            f"{unmapped}. Add them to FINDING_TO_EXPERT before training. "
-            f"(Findings declared here but absent from the data: {unused or 'none'} "
-            "— expected if you are on the 14-class Kaggle subset.)"
+            f"{len(unmapped)} label(s) in the data have no region assignment: "
+            f"{unmapped}. Add them to FINDING_TO_REGION (or LABEL_ALIASES if it "
+            "is a spelling difference) before training."
         )
     return unmapped

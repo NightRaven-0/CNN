@@ -1,0 +1,25 @@
+{
+  "source": "https://nihcc.app.box.com/v/ChestXray-NIHCC",
+  "shared_name": "zx7xbtg7oj9ko9ghmgmsm5zd7tnhhscp",
+  "note": "Each archive carries a direct url as well as a Box file_id. The shared-link endpoint on nihcc.app.box.com began returning 404 for every request after about two hours of downloading, folder page included. The direct urls on nihcc.box.com are the ones NIH publishes in batch_download_zips.py, they support range requests, and every Content-Length matches the size recorded here. The metadata files have no direct url, so re-running from scratch needs the shared-link endpoint to be answering.",
+  "metadata": [
+    {"name": "Data_Entry_2017_v2020.csv", "file_id": "f_219760887468"},
+    {"name": "BBox_List_2017.csv", "file_id": "f_219760940956"},
+    {"name": "train_val_list.txt", "file_id": "f_256056636701"},
+    {"name": "test_list.txt", "file_id": "f_256055473534"}
+  ],
+  "archives": [
+    {"name": "images_001.tar.gz", "file_id": "f_219764235225", "size": 2008470987, "url": "https://nihcc.box.com/shared/static/vfk49d74nhbxq3nqjg0900w5nvkorp5c.gz"},
+    {"name": "images_002.tar.gz", "file_id": "f_219767703471", "size": 3952623504, "url": "https://nihcc.box.com/shared/static/i28rlmbvmfjbl8p2n3ril0pptcmcu9d1.gz"},
+    {"name": "images_003.tar.gz", "file_id": "f_219770039352", "size": 3929234850, "url": "https://nihcc.box.com/shared/static/f1t00wrtdk94satdfb9olcolqx20z2jp.gz"},
+    {"name": "images_004.tar.gz", "file_id": "f_221185642661", "size": 3838903983, "url": "https://nihcc.box.com/shared/static/0aowwzs5lhjrceb3qp67ahp0rd1l1etg.gz"},
+    {"name": "images_005.tar.gz", "file_id": "f_219776556743", "size": 3935496531, "url": "https://nihcc.box.com/shared/static/v5e3goj22zr6h8tzualxfsqlqaygfbsn.gz"},
+    {"name": "images_006.tar.gz", "file_id": "f_219777758783", "size": 3986301172, "url": "https://nihcc.box.com/shared/static/asi7ikud9jwnkrnkj99jnpfkjdes7l6l.gz"},
+    {"name": "images_007.tar.gz", "file_id": "f_220610700915", "size": 4016328426, "url": "https://nihcc.box.com/shared/static/jn1b4mw4n6lnh74ovmcjb8y48h8xj07n.gz"},
+    {"name": "images_008.tar.gz", "file_id": "f_219776273384", "size": 4018347353, "url": "https://nihcc.box.com/shared/static/tvpxmn7qyrgl0w8wfh9kqfjskv6nmm1j.gz"},
+    {"name": "images_009.tar.gz", "file_id": "f_219782291318", "size": 4111327929, "url": "https://nihcc.box.com/shared/static/upyy3ml7qdumlgk2rfcvlb9k6gvqq2pj.gz"},
+    {"name": "images_010.tar.gz", "file_id": "f_219781375034", "size": 4181556296, "url": "https://nihcc.box.com/shared/static/l6nilvfa9cg3s28tqv1qc1olm3gnz54p.gz"},
+    {"name": "images_011.tar.gz", "file_id": "f_219777519815", "size": 4187084020, "url": "https://nihcc.box.com/shared/static/hhq8fkdgvcari67vfhs7ppg2w6ni4jze.gz"},
+    {"name": "images_012.tar.gz", "file_id": "f_219778785923", "size": 2914187733, "url": "https://nihcc.box.com/shared/static/ioqwiy20ihqwyr8pf4c24eazhh281pbu.gz"}
+  ]
+}
