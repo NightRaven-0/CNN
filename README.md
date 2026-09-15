@@ -39,14 +39,14 @@ Class imbalance is handled with a weighted loss. Hernia, for example, appears in
 
 ## Explanation layer
 
-This is the main part of the project. We run six explanation methods on the same trained model:
+This is the main part of the project. Four explanation methods were evaluated on the trained model, next to a random control:
 
 - CAM, the original class activation map. For this architecture it adds up exactly to the model's prediction, so it is a decomposition of the answer rather than an estimate of it, and it costs nothing extra to compute.
 - Grad-CAM and Grad-CAM++, gradient-weighted activation maps and the usual choice in medical imaging papers
-- Score-CAM, the same idea without gradients. It needs one pass per channel and the last block has 1024 of them, so it runs on a subsample rather than the whole test set.
-- Integrated Gradients, a pixel-level method that adds up gradients along a path from a blank image to the real one
-- Occlusion, which hides patches of the image and watches how the prediction changes
+- EigenCAM, which takes the main component of the last layer's activations. It uses no gradients and ignores which finding is being explained, so it shows the same region whatever the question.
 - A random map, as a control. Any score a random map also earns is not evidence of anything, and we would rather find that out ourselves than have a reviewer find it.
+
+Three more methods are in the code but have not been evaluated: Score-CAM, Integrated Gradients and occlusion. Integrated Gradients and occlusion have unit tests. Score-CAM needs one forward pass per channel, 1024 of them for this network, and the other two work pixel by pixel instead of on the 16 by 16 grid, so all three need a slower evaluation path. They are listed under later work, not reported as results.
 
 The methods rest on different assumptions, which is why we run several. If they agree, that agreement counts as evidence. If they disagree, that's reported as well.
 
@@ -64,7 +64,7 @@ We do all this because heatmaps in medical imaging are often less reliable than 
 
 This is the second priority, and most of it comes out of the explanation layer. Each heatmap is thresholded into a box and compared with the radiologist boxes using the measure Wang et al. used themselves, T(IoBB), at thresholds of 0.1, 0.25 and 0.5. Their numbers are our baseline. At the loosest threshold their accuracy ran from 0.99 for cardiomegaly down to 0.16 for nodules.
 
-Boxes are also mapped onto six lung zones plus the mediastinum, so the output reads the way a report would.
+The prediction script also names an approximate zone for the hottest part of a map: patient left or right, and upper, middle or lower. It comes from image geometry, not a lung segmentation, and has not been checked against anatomy, so it is a readout for demonstrations rather than a result.
 
 ## What "comparable results" means
 
@@ -162,7 +162,7 @@ No method wins on everything. A paper quoting one number for one method is there
 | NIH ChestX-ray14 over VinDr-CXR | Official split, many published baselines, no access paperwork | Noisier labels, far fewer boxes |
 | DenseNet-121 | Direct comparison with CheXNet-style work | Not the strongest backbone around today |
 | 512 px input | 16×16 explanation maps instead of 7×7 | About 5 times the compute per image, and a departure from CheXNet's 224 |
-| Six explanation methods | Agreement between methods becomes evidence, and one weak method can't sink the result | More compute, and more to explain in the paper |
+| Four explanation methods plus a random control | Agreement between methods becomes evidence, and one weak method can't sink the result | More compute, and more to explain in the paper |
 | Post-hoc explanations first | Works on any trained model, and matches most published work | The explanation is worked out afterwards, not built into the model |
 | Official split only | Our numbers line up with the literature | No freedom to pick a friendlier split, which is the whole reason for using it |
 
@@ -182,6 +182,7 @@ A heatmap shows where the model looked. It doesn't show whether the model reason
 
 ## Later, after the first results
 
+- Evaluating Score-CAM, Integrated Gradients and occlusion, which are written but not yet scored
 - Explanations built into the model itself, either with an attention-pooling head or with a prototype network that says "this region looks like these training cases"
 - A test set from a second hospital, such as VinDr-CXR or CheXlocalize
 - A newer backbone such as ConvNeXt, and higher resolution
@@ -201,7 +202,7 @@ Written and tested (40 tests passing), and run end to end:
 - data splitting by patient, with a check that fails loudly if a patient ever lands in two splits
 - loading of the NIH labels, the official split and the boxes, checked against the real files
 - the DenseNet-121 model, whose class activation maps add up exactly to its predictions
-- the six explanation methods, and the scoring that grades them against the boxes
+- seven explanation methods in code, four of them evaluated, and the scoring that grades them against the boxes
 - scripts that download, preprocess, train, and produce the three results tables: classification scores, localisation against the boxes, and faithfulness alongside the sanity check
 
 Measured on this machine rather than estimated: training at batch size 32 on 512 px images uses about 11 GB of the GPU's 16 GB and runs at 165 images per second, which is roughly 8.5 minutes per epoch. At most 12 epochs with early stopping puts a full run under two hours. The data download is still going, and training starts once all 112,120 images are on disk.
