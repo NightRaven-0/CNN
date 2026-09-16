@@ -226,10 +226,22 @@ def localisation_by_finding(xai: Path, out: Path) -> None:
     ax.set_title("How well the best localiser does, finding by finding", pad=26)
     ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncol=2, fontsize=8.5, borderaxespad=0.2)
     nodule = best.loc["Nodule"]
-    caption(fig, f"Nodules score {nodule['pointing_hit']:.2f} against {control.at['Nodule', 'pointing_hit']:.2f} "
-                 f"for a random map, and across all {counts['Nodule']} nodule cases no derived box overlaps the "
-                 f"radiologist's by half its own area (T(IoBB) at 0.5 is {nodule['iobb@0.5']:.2f}). Large findings "
-                 "that sit in the same place every time are easy; small ones are not.")
+    resolution = pd.read_csv(xai / "nodule_resolution.csv", index_col="method")
+    sizes = pd.read_csv(xai / "box_sizes.csv", index_col="finding")
+    weakest = best["pointing_hit"].drop("Nodule").idxmin()
+    cases = int(resolution.at["gradcam++", "n"])
+    reachable = int(resolution.at["gradcam++", "reachable_cases"])
+    reach = (f"could not be reached in any of the {cases} cases" if reachable == 0
+             else f"was within reach in only {reachable} of {cases} cases")
+    caption(fig, f"{weakest} is the clearest failure: its maps usually point somewhere else, for a pointing "
+                 f"score of {best.at[weakest, 'pointing_hit']:.2f}. Nodules score almost as low, "
+                 f"{nodule['pointing_hit']:.2f} against {control.at['Nodule', 'pointing_hit']:.2f} for a random "
+                 "map, but part of that is measurement. The median nodule box is "
+                 f"{sizes.at['Nodule', 'median_w']:.0f} by {sizes.at['Nodule', 'median_h']:.0f} px, about one cell "
+                 "of the 16 by 16 explanation grid, so the box drawn from a map is many times larger and T(IoBB) "
+                 f"at 0.5 {reach}, however well the map was placed. Counting instead whether that box contains "
+                 f"the nodule's centre, Grad-CAM++ manages {resolution.at['gradcam++', 'centre_inside']:.0%} "
+                 f"against {resolution.at['random', 'centre_inside']:.0%} for a random map.")
     save(fig, out, "5_localisation_by_finding.png")
 
 
@@ -253,8 +265,13 @@ def roc_grid(run: Path, data: Path, out: Path) -> None:
         ax.set_aspect("equal")
         ax.set_xticks([0, 0.5, 1])
         ax.set_yticks([0, 0.5, 1])
-    for ax in flat[len(order):]:
-        ax.set_visible(False)
+    for index in range(len(order), len(flat)):
+        flat[index].set_visible(False)
+        # Shared x axes only label the bottom row, so a panel sitting above an
+        # empty slot would otherwise have no scale under it at all.
+        above = index - cols
+        if 0 <= above < len(order):
+            flat[above].tick_params(labelbottom=True)
     fig.supxlabel("false positive rate", color=INK_2)
     fig.supylabel("true positive rate", color=INK_2)
     fig.suptitle(f"ROC curves on the official test split ({len(merged):,} images), ordered by AUROC",
@@ -297,13 +314,25 @@ def boxes_for(boxes: pd.DataFrame, name: str, finding: str) -> list[tuple]:
     return [(r.x, r.y, r.w, r.h) for r in hits.itertuples()]
 
 
+def score_label(scores: pd.DataFrame, name: str, finding: str) -> str:
+    """The evaluated probability, plus the share of test images scoring at least as high.
+
+    The scores are not calibrated, so a raw probability misleads on its own: a case
+    at 0.05 can still rank near the top for a finding whose negatives mostly score
+    below that.
+    """
+    p = float(scores.at[name, finding])
+    top = float((scores[finding] >= p).mean())
+    return f"p = {p:.2f}\ntop {top:.0%} of test"
+
+
 def heat_scale(fig, axes) -> None:
     fig.colorbar(ScalarMappable(norm=Normalize(0, 1), cmap=HEAT), ax=axes, orientation="horizontal",
                  fraction=0.025, pad=0.02, aspect=50,
                  label="explanation strength, scaled within each map")
 
 
-def gallery_typical(model, xai: Path, data: Path, images: Path, out: Path, device) -> None:
+def gallery_typical(model, scores: pd.DataFrame, xai: Path, data: Path, images: Path, out: Path, device) -> None:
     detail = pd.read_csv(xai / "xai_per_image.csv")
     boxes = load_boxes(data)
     transform = build_transforms(512, train=False)
@@ -318,6 +347,7 @@ def gallery_typical(model, xai: Path, data: Path, images: Path, out: Path, devic
     pages = math.ceil(len(cases) / 4)
     for page in range(pages):
         chunk = cases[page * 4 : page * 4 + 4]
+        ranks: list[tuple[str, float]] = []
         fig, axes = plt.subplots(len(chunk), 4, figsize=(9.4, 2.5 * len(chunk) + 0.9),
                                  squeeze=False, layout="constrained")
         for r, (finding, name) in enumerate(chunk):
@@ -325,12 +355,11 @@ def gallery_typical(model, xai: Path, data: Path, images: Path, out: Path, devic
             pil = Image.open(images / name).convert("L")
             image = np.asarray(pil)
             x = transform(pil).unsqueeze(0).to(device)
-            with torch.no_grad():
-                prob = float(torch.sigmoid(model(x))[0, class_index])
             truth = boxes_for(boxes, name, finding)
+            ranks.append((finding, float((scores[finding] >= scores.at[name, finding]).mean())))
 
             draw_case(axes[r, 0], image, None, truth)
-            axes[r, 0].set_ylabel(f"{finding.replace('_', ' ')}\np = {prob:.2f}", rotation=0, ha="right",
+            axes[r, 0].set_ylabel(f"{finding.replace('_', ' ')}\n{score_label(scores, name, finding)}", rotation=0, ha="right",
                                   va="center", labelpad=12, color=INK, fontsize=10)
             axes[r, 0].set_xlabel("radiologist box in blue", color=INK_2, fontsize=8.5)
             for c, method in enumerate(columns, start=1):
@@ -344,9 +373,22 @@ def gallery_typical(model, xai: Path, data: Path, images: Path, out: Path, devic
         heat_scale(fig, axes)
         fig.suptitle(f"Explanations on typical test cases, page {page + 1} of {pages}", x=0.01, ha="left",
                      fontsize=12, fontweight="bold")
+        weakest, weakest_top = max(ranks, key=lambda item: item[1])
+        # Only say a case went unflagged when one on this page actually did.
+        unflagged = (
+            f"The {weakest.replace('_', ' ')} case ranks in the top {weakest_top:.0%}, below most test "
+            "images, so the model has not flagged it. Its maps are still drawn, and show where the model "
+            "sees the most evidence for the finding, however weak, which is how a map can land in the "
+            "right place while the score stays low. "
+            if weakest_top > 0.5 else ""
+        )
         caption(fig, "Each row is the median case for its finding, ranked by Grad-CAM++ overlap, so these are "
                      "neither the best nor the worst examples. p is the model's probability for the finding. "
-                     "'hit' means the hottest point falls inside the radiologist's box; IoU is the overlap "
+                     f"The scores are not calibrated, so below p is the share of the {len(scores):,} test "
+                     "images scoring at least as high. Maps are drawn for the finding the radiologist boxed, "
+                     "whatever the model predicted, which is how the localisation scores are computed. "
+                     + unflagged
+                     + "'hit' means the hottest point falls inside the radiologist's box; IoU is the overlap "
                      "of the box derived from the map with the radiologist's box.")
         save(fig, out, f"7_gallery_typical_{page + 1}.png")
 
@@ -379,8 +421,10 @@ def gallery_range(model, xai: Path, data: Path, images: Path, out: Path, device)
     heat_scale(fig, axes)
     fig.suptitle("Best, median and worst case for Grad-CAM++", x=0.01, ha="left",
                  fontsize=12, fontweight="bold")
-    caption(fig, "Ranked by overlap with the radiologist's box. The spread within a finding shows how much a "
-                 "single hand picked example can mislead in either direction.")
+    caption(fig, "Ranked by overlap with the radiologist's box. A nodule box is about one cell of the 16 by 16 "
+                 "explanation grid, so overlap cannot credit a map that lands on a nodule: the median nodule case "
+                 "here peaks within one grid cell of it and still scores as a miss. The best nodule case by "
+                 "overlap is a diffuse map that happens to cover the box, the same weakness from the other side.")
     save(fig, out, "8_gallery_range.png")
 
 
@@ -404,7 +448,8 @@ def main() -> int:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = load_model(args.run, device)
-    gallery_typical(model, args.xai, args.data, args.images, args.out, device)
+    scores = pd.read_csv(args.run / "test_predictions.csv").set_index(IMAGE_COL)
+    gallery_typical(model, scores, args.xai, args.data, args.images, args.out, device)
     gallery_range(model, args.xai, args.data, args.images, args.out, device)
     return 0
 

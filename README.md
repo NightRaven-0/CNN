@@ -31,9 +31,9 @@ Our first plan used VinDr-CXR, which has cleaner labels and many more boxes. We 
 
 ## Model
 
-DenseNet-121 pretrained on ImageNet, with 14 sigmoid outputs, one per disease. CheXNet used this architecture, and it's the most common baseline on this dataset, so our numbers will be easy to place.
+DenseNet-121 pretrained on ImageNet, with 14 sigmoid outputs, one per disease. CheXNet used this architecture, and it's the most common baseline on this dataset, so the numbers are easy to place.
 
-One change from CheXNet: we train on 512×512 images instead of 224×224. The explanation maps come from the last convolutional layer, which is a 7×7 grid at 224 and a 16×16 grid at 512. A 7×7 grid is too coarse to point at a nodule. The larger size costs about five times the compute per image, and our GPU (RTX 5070 Ti, 16 GB) can handle it.
+One change from CheXNet: we train on 512×512 images instead of 224×224. The explanation maps come from the last convolutional layer, which is a 7×7 grid at 224 and a 16×16 grid at 512. A 7×7 grid is too coarse to point at a nodule, and the results show that even 16×16 is too coarse for box-overlap scores to judge nodules fairly. The larger size costs about five times the compute per image, and our GPU (RTX 5070 Ti, 16 GB) can handle it.
 
 Class imbalance is handled with a weighted loss. Hernia, for example, appears in well under 1% of images.
 
@@ -101,6 +101,8 @@ Mean AUROC 0.8158, mean AUPRC 0.2878. Per-class figures with 95% bootstrap inter
 
 Pneumonia scores 0.711 by AUROC and 0.048 by AUPRC. At that prevalence the model is close to useless for it in practice, and a table carrying only AUROC would hide the fact entirely.
 
+The probabilities themselves are not calibrated. Across the eight findings that have boxes, the median true positive scores between 0.24 (Pneumonia) and 0.67 (Pneumothorax), so 0.5 is not a meaningful cut-off, and anyone using the model would need a threshold chosen per finding. Ranking is what it does well: for each finding, the median boxed test case sits between the 75th and 97th percentile of all test images, though individual cases vary widely.
+
 ### Do the explanations point where the radiologists did
 
 Scored over the 984 image and finding pairs that carry hand-drawn boxes. All of them fall in the test split, so no box was seen during training.
@@ -122,7 +124,13 @@ The spread between findings is far wider than the spread between methods:
 | Cardiomegaly | 0.870 | 0.815 | 0.349 |
 | Nodule | 0.203 | 0.000 | 0.114 |
 
-Nodules are the clear failure. Across all 79 boxed nodule cases, no method ever produced a box overlapping the radiologist's by half its own area. Cardiomegaly, which is large and sits in the same place every time, is localised well by everything. That reproduces Arun et al. (2021) on a dataset they did not use: saliency handles big stereotyped findings and fails on small ones.
+Cardiomegaly, which is large and sits in the same place every time, is localised well by everything. Pneumothorax is the clearest failure. With Grad-CAM++, the best localiser overall, its pointing score is 0.22, the lowest of any finding for that method: most of its maps point somewhere other than the radiologist's box.
+
+Nodules score almost as low, but for them the scores are the problem. The median nodule box is 70 by 68 pixels, about one cell of the 16 by 16 grid the explanations are computed on, while the next smallest finding, masses, has boxes three times that area. A box drawn from any map ends up around twelve times the size of the nodule, which caps IoU and T(IoBB) however well the map is placed. For all four methods, in every one of the 79 nodule cases, no placement of that box could have reached T(IoBB) 0.5, so the zero in that column says nothing about the explanations.
+
+So we added a check the grid can answer: does the box drawn from the map contain the nodule's centre? It does in 61% of cases for Grad-CAM++, 59% for CAM and 57% for Grad-CAM, against 13% for a random map. EigenCAM, which ignores which finding it is explaining, manages 37%. The explanations find nodules far more often than chance, and the standard box scores cannot show it at this resolution. The numbers are in `runs/xai/nodule_resolution.csv`.
+
+At the strictest threshold, Wang et al.'s own localisation table for this dataset has the same extremes, cardiomegaly highest and nodules lowest, and the same caveat may apply to it.
 
 ### Are the explanations faithful to the model
 
@@ -142,7 +150,7 @@ Randomise the network from the output backwards and watch whether the map moves.
 
 | method | mean absolute correlation |
 |---|---|
-| CAM | 0.010 |
+| CAM | 0.009 |
 | Grad-CAM | 0.052 |
 | EigenCAM | 0.152 |
 | Grad-CAM++ | 0.199 |
@@ -176,6 +184,8 @@ The labels are text-mined and some are wrong. We can't fix that, only state it.
 
 Explanation scores exist only for the 8 classes that have boxes.
 
+The explanation maps are 16 by 16, coarser than a nodule, so box-overlap scores cannot judge localisation for findings that small. The nodule results use a containment check instead, which we defined for this purpose and which has not been validated anywhere else.
+
 All the data is from one hospital, so we have no evidence yet that the model works elsewhere. Zech et al. (2018) showed that chest X-ray models can lose a lot of accuracy at a new hospital.
 
 A heatmap shows where the model looked. It doesn't show whether the model reasoned the way a radiologist would. None of this is clinical validation, and the system isn't meant for diagnosis.
@@ -183,6 +193,7 @@ A heatmap shows where the model looked. It doesn't show whether the model reason
 ## Later, after the first results
 
 - Evaluating Score-CAM, Integrated Gradients and occlusion, which are written but not yet scored
+- Calibrating the probabilities on the validation set, for example with temperature scaling, and choosing a threshold for each finding
 - Explanations built into the model itself, either with an attention-pooling head or with a prototype network that says "this region looks like these training cases"
 - A test set from a second hospital, such as VinDr-CXR or CheXlocalize
 - A newer backbone such as ConvNeXt, and higher resolution
@@ -204,8 +215,36 @@ Written and tested (40 tests passing), and run end to end:
 - the DenseNet-121 model, whose class activation maps add up exactly to its predictions
 - seven explanation methods in code, four of them evaluated, and the scoring that grades them against the boxes
 - scripts that download, preprocess, train, and produce the three results tables: classification scores, localisation against the boxes, and faithfulness alongside the sanity check
+- a script that draws the review figures, a check on how far box scores can judge nodules at this resolution, and a tool that runs the model on a single X-ray and saves its explanation
 
-Measured on this machine rather than estimated: training at batch size 32 on 512 px images uses about 11 GB of the GPU's 16 GB and runs at 165 images per second, which is roughly 8.5 minutes per epoch. At most 12 epochs with early stopping puts a full run under two hours. The data download is still going, and training starts once all 112,120 images are on disk.
+Measured on this machine: training at batch size 32 on 512 px images used about 12 GB of the GPU's 16 GB. The first epoch took 10.4 minutes while cuDNN tuned its kernels and the rest about 7.5 each, and early stopping ended the run after 7 epochs, about 55 minutes in all. Training saves a resumable checkpoint after every epoch. That was added after three power cuts during the data download, and was tested by interrupting a run on purpose.
+
+## Reproducing the results
+
+Everything runs from the project root. The environment is defined in `pyproject.toml`, and `uv` builds it with the PyTorch build this GPU needs.
+
+```bash
+uv sync --extra dev
+uv run python scripts/download_nih.py
+uv run python scripts/preprocess_nih.py
+uv run python scripts/train.py
+uv run python scripts/evaluate.py --run runs/densenet121_512
+uv run python scripts/evaluate_xai.py --checkpoint runs/densenet121_512/best.pt
+uv run python scripts/evaluate_faithfulness.py --checkpoint runs/densenet121_512/best.pt --randomisation-samples 8
+uv run python scripts/check_nodule_resolution.py
+uv run python scripts/make_figures.py
+```
+
+The download is 45 GB and took about nine hours on a 1.4 MB/s connection; it picks up where it stopped if interrupted. Preprocessing takes about five minutes, training about an hour, and the evaluations another half hour.
+
+To run the model on one X-ray and see its explanation:
+
+```bash
+uv run python scripts/predict.py data/processed/nih512/00021181_002.png
+uv run python scripts/predict.py data/processed/nih512/00025662_006.png --finding Nodule --method gradcam++
+```
+
+It prints all 14 findings ranked by probability and saves a picture to `runs/predictions/`, with the radiologist's box drawn when the image has one. It warns if the image was used in training.
 
 ## References
 
