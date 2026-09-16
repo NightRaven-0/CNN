@@ -79,7 +79,7 @@ Published mean AUROC on the official test split:
 | **this project** | **0.816** | DenseNet-121 at 512 px |
 | arXiv:2404.18933 (2024) | 0.824 | DenseNet-121 with their method |
 
-We measured 0.8158. It sits above four of the five published figures and below the best one, which is what we meant by comparable.
+We measured 0.8158. It sits above four of the five published figures and below the best one, which is what we meant by comparable. Repeating the whole procedure with two more seeds gave 0.8190 and 0.8164, a spread of 0.0032, which is about the size of the gap to the 0.812 figure. The result is in line with published work, not an improvement on it.
 
 There's one trap here. CheXNet's often-quoted 0.841 was measured on its own random 70/10/20 split, not on the official one. Baltruschat et al. showed that the choice of split alone shifts results noticeably. That number shouldn't go in the same table as official-split results unless the difference is stated.
 
@@ -102,6 +102,22 @@ Mean AUROC 0.8158, mean AUPRC 0.2878. Per-class figures with 95% bootstrap inter
 Pneumonia scores 0.711 by AUROC and 0.048 by AUPRC. At that prevalence the model is close to useless for it in practice, and a table carrying only AUROC would hide the fact entirely.
 
 The probabilities themselves are not calibrated. Across the eight findings that have boxes, the median true positive scores between 0.24 (Pneumonia) and 0.67 (Pneumothorax), so 0.5 is not a meaningful cut-off, and anyone using the model would need a threshold chosen per finding. Ranking is what it does well: for each finding, the median boxed test case sits between the 75th and 97th percentile of all test images, though individual cases vary widely.
+
+### Run to run variation
+
+The whole procedure was repeated three times with different seeds. A seed changes the weight initialisation, the shuffling, the augmentation and which 10% of the training data is held out for validation. The test set is fixed by NIH's official list and never chooses anything.
+
+| run | seed | epochs | best epoch | best validation | test AUROC |
+|---|---|---|---|---|---|
+| `densenet121_512` | 1337 | 7 | 4 | 0.8533 | 0.8158 |
+| `densenet121_512_seed2024` | 2024 | 8 | 5 | 0.8479 | 0.8190 |
+| `densenet121_512_seed7` | 7 | 8 | 5 | 0.8483 | 0.8164 |
+
+Mean 0.8171, spread 0.0032 between lowest and highest. All three stopped early after 7 or 8 epochs and kept weights from epoch 4 or 5, so the training behaviour is consistent.
+
+Two details are worth keeping. The run with the best validation score, seed 1337, has the lowest test score of the three, so validation ranking does not predict test ranking across runs. And each run validates on a different split, so those validation numbers are not strictly comparable to each other in the first place. Within a run, validation is what picks the epoch to keep. Across runs nothing picks a winner, and the honest number is the mean with its spread.
+
+All three runs are kept in full, with weights, per-epoch history and test metrics, under `runs/`. Everything else in this document comes from the first run, which was chosen before the other two existed. Picking the best of the three by test score would be choosing on the test set, which is the one thing the official split exists to prevent.
 
 ### Do the explanations point where the radiologists did
 
@@ -215,7 +231,7 @@ Written and tested (40 tests passing), and run end to end:
 - the DenseNet-121 model, whose class activation maps add up exactly to its predictions
 - seven explanation methods in code, four of them evaluated, and the scoring that grades them against the boxes
 - scripts that download, preprocess, train, and produce the three results tables: classification scores, localisation against the boxes, and faithfulness alongside the sanity check
-- a script that draws the review figures, a check on how far box scores can judge nodules at this resolution, and a tool that runs the model on a single X-ray and saves its explanation
+- a script that draws the review figures, a check on how far box scores can judge nodules at this resolution, a comparison across repeated runs, and a tool that runs the model on a single X-ray and saves its explanation
 
 Measured on this machine: training at batch size 32 on 512 px images used about 12 GB of the GPU's 16 GB. The first epoch took 10.4 minutes while cuDNN tuned its kernels and the rest about 7.5 each, and early stopping ended the run after 7 epochs, about 55 minutes in all. Training saves a resumable checkpoint after every epoch. That was added after three power cuts during the data download, and was tested by interrupting a run on purpose.
 
@@ -233,6 +249,16 @@ uv run python scripts/evaluate_xai.py --checkpoint runs/densenet121_512/best.pt
 uv run python scripts/evaluate_faithfulness.py --checkpoint runs/densenet121_512/best.pt --randomisation-samples 8
 uv run python scripts/check_nodule_resolution.py
 uv run python scripts/make_figures.py
+```
+
+To measure how much the result moves when the procedure is repeated:
+
+```bash
+uv run python scripts/train.py --seed 2024 --out runs/densenet121_512_seed2024
+uv run python scripts/evaluate.py --run runs/densenet121_512_seed2024
+uv run python scripts/train.py --seed 7 --out runs/densenet121_512_seed7
+uv run python scripts/evaluate.py --run runs/densenet121_512_seed7
+uv run python scripts/compare_runs.py
 ```
 
 The download is 45 GB and took about nine hours on a 1.4 MB/s connection; it picks up where it stopped if interrupted. Preprocessing takes about five minutes, training about an hour, and the evaluations another half hour.
