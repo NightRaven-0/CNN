@@ -111,12 +111,14 @@ def published_comparison(run: Path, out: Path) -> None:
     rows.append(("This project (DenseNet-121, 512 px)", metrics["mean_auroc"], True))
     rows.sort(key=lambda r: r[1])
 
-    fig, ax = plt.subplots(figsize=(8.2, 3.4), layout="constrained")
+    fig, ax = plt.subplots(figsize=(9.6, 0.32 * len(rows) + 1.5), layout="constrained")
     ys = np.arange(len(rows))
     for y, (_, value, ours) in zip(ys, rows, strict=True):
         ax.scatter(value, y, s=90 if ours else 64, color=SLOT_1 if ours else MUTED,
                    edgecolor=SURFACE, linewidth=2, zorder=3)
-        ax.annotate(f"{value:.3f}", (value, y), xytext=(9, 0), textcoords="offset points", va="center",
+        # Most papers print three decimals; a few print four, so keep what they printed.
+        shown = f"{value:.3f}" if round(value, 3) == value else f"{value:.4f}"
+        ax.annotate(shown, (value, y), xytext=(9, 0), textcoords="offset points", va="center",
                     color=INK if ours else INK_2, fontsize=9, fontweight="bold" if ours else "normal")
     ax.set_yticks(ys, [r[0] for r in rows])
     for tick, (_, _, ours) in zip(ax.get_yticklabels(), rows, strict=True):

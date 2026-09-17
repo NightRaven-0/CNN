@@ -62,26 +62,33 @@ We do all this because heatmaps in medical imaging are often less reliable than 
 
 ## Localisation
 
-This is the second priority, and most of it comes out of the explanation layer. Each heatmap is thresholded into a box and compared with the radiologist boxes using the measure Wang et al. used themselves, T(IoBB), at thresholds of 0.1, 0.25 and 0.5. Their numbers are our baseline. At the loosest threshold their accuracy ran from 0.99 for cardiomegaly down to 0.16 for nodules.
+This is the second priority, and most of it comes out of the explanation layer. Each heatmap is thresholded into a box and compared with the radiologist boxes using the measure Wang et al. used themselves, T(IoBB), at thresholds of 0.1, 0.25 and 0.5. Their numbers are our baseline. On this dataset, at the loosest threshold, their accuracy ran from 1.00 for cardiomegaly down to 0.15 for nodules.
 
 The prediction script also names an approximate zone for the hottest part of a map: patient left or right, and upper, middle or lower. It comes from image geometry, not a lung segmentation, and has not been checked against anatomy, so it is a readout for demonstrations rather than a result.
 
 ## What "comparable results" means
 
-Published mean AUROC on the official test split:
+Published mean AUROC on the official test split. Each figure was checked against the table in the paper itself:
 
-| Work | Mean AUROC | Notes |
+| Work | Network and input | Mean AUROC |
 |---|---|---|
-| Wang et al. 2017 | 0.745 | original baseline, ResNet-50 |
-| Yao et al. 2017 | 0.761 | |
-| Baltruschat et al. 2019 | 0.806 | ResNet-38 using image plus patient age, sex and view position |
-| arXiv:2404.18933 (2024) | 0.812 | DenseNet-121 |
-| **this project** | **0.816** | DenseNet-121 at 512 px |
-| arXiv:2404.18933 (2024) | 0.824 | DenseNet-121 with their method |
+| Wang et al. 2017 | ResNet-50, 1024 px | 0.745 |
+| Yao et al. 2018 | ResNet and DenseNet, 512 px, no pretraining | 0.761 |
+| Baltruschat et al. 2019 | ResNet-38, 448 px, plus age, sex and view position | 0.806 |
+| Guendel et al. 2018 | DenseNet-121, 1024 px | 0.807 |
+| Taslimi et al. 2022 (SwinCheX) | Swin-L transformer, 224 px | 0.810 |
+| Guan and Huang 2020 | DenseNet-121 with category-wise attention | 0.816 |
+| Ma et al. 2019 | two DenseNet-121s with cross-attention | 0.817 |
+| **this project, three runs** | **DenseNet-121, 512 px** | **0.816 to 0.819** |
+| Goel et al. 2024 | DenseNet-121, 224 px | 0.8202 |
+| Hermoza et al. 2020 | DenseNet-121, 512 px | 0.821 |
+| Kim et al. 2021 (XProtoNet) | DenseNet-121, 512 px | 0.822 |
+| Goel et al. 2024 | DenseNet-121 with low-rank features, 224 px | 0.8235 |
+| Xiao et al. 2023 | ViT-B pretrained on 0.5M chest X-rays, 224 px | 0.830 |
 
-We measured 0.8158. It sits above four of the five published figures and below the best one, which is what we meant by comparable. Repeating the whole procedure with two more seeds gave 0.8190 and 0.8164, a spread of 0.0032, which is about the size of the gap to the 0.812 figure. The result is in line with published work, not an improvement on it.
+We measured 0.8158, and repeating the whole procedure with two more seeds gave 0.8190 and 0.8164, a mean of 0.8171. DenseNet-121 results on this split run from 0.807 to 0.822, and ours sit inside that range, a little below its top: Hermoza et al. and XProtoNet, both DenseNet-121 at 512 px like ours, report 0.821 and 0.822. Transformers pretrained on hundreds of thousands of chest X-rays reach 0.830. The result is in line with published work, not an improvement on it.
 
-There's one trap here. CheXNet's often-quoted 0.841 was measured on its own random 70/10/20 split, not on the official one. Baltruschat et al. showed that the choice of split alone shifts results noticeably. That number shouldn't go in the same table as official-split results unless the difference is stated.
+There's one trap here. CheXNet's often-quoted 0.841 was measured on its own random 70/10/20 split, not on the official one, and so were Yao et al.'s 2017 results; their official-split figure is the 2018 one above. Baltruschat et al. showed that the choice of split alone shifts results noticeably. Random-split numbers shouldn't go in the same table as official-split results unless the difference is stated.
 
 ## Results
 
@@ -127,7 +134,7 @@ Scored over the 984 image and finding pairs that carry hand-drawn boxes. All of 
 |---|---|---|---|---|---|
 | Grad-CAM++ | 0.544 | 0.212 | 0.685 | 0.550 | 0.376 |
 | Grad-CAM | 0.496 | 0.182 | 0.617 | 0.500 | 0.337 |
-| CAM | 0.493 | 0.177 | 0.607 | 0.498 | 0.336 |
+| CAM | 0.493 | 0.176 | 0.607 | 0.498 | 0.336 |
 | EigenCAM | 0.479 | 0.190 | 0.629 | 0.504 | 0.319 |
 | random control | 0.228 | 0.091 | 0.371 | 0.261 | 0.131 |
 
@@ -147,6 +154,20 @@ Nodules score almost as low, but for them the scores are the problem. The median
 So we added a check the grid can answer: does the box drawn from the map contain the nodule's centre? It does in 61% of cases for Grad-CAM++, 59% for CAM and 57% for Grad-CAM, against 13% for a random map. EigenCAM, which ignores which finding it is explaining, manages 37%. The explanations find nodules far more often than chance, and the standard box scores cannot show it at this resolution. The numbers are in `runs/xai/nodule_resolution.csv`.
 
 At the strictest threshold, Wang et al.'s own localisation table for this dataset has the same extremes, cardiomegaly highest and nodules lowest, and the same caveat may apply to it.
+
+### Against published localisation numbers
+
+Two published results use the same boxes. Wang et al. count a box as correct when at least half of it lies inside the radiologist's box (IoBB of 0.5 or more). Hermoza et al. use overlap instead (IoU of 0.3 or more), which also punishes a box of the wrong size. The table gives the share of boxes counted correct, with our Grad-CAM++ maps.
+
+| measure and source | Atelectasis | Cardiomegaly | Effusion | Infiltration | Mass | Nodule | Pneumonia | Pneumothorax | mean |
+|---|---|---|---|---|---|---|---|---|---|
+| IoBB, Wang et al. 2017 | 0.19 | 0.95 | 0.42 | 0.65 | 0.31 | 0.00 | 0.48 | 0.27 | 0.41 |
+| IoBB, ours | 0.10 | 0.83 | 0.39 | 0.58 | 0.20 | 0.00 | 0.56 | 0.16 | 0.35 |
+| IoU, Wang et al. 2017 (as reported by Hermoza et al.) | 0.24 | 0.46 | 0.30 | 0.28 | 0.15 | 0.04 | 0.17 | 0.13 | 0.22 |
+| IoU, Hermoza et al. 2020 | 0.37 | 0.99 | 0.37 | 0.54 | 0.35 | 0.04 | 0.60 | 0.21 | 0.43 |
+| IoU, ours | 0.19 | 0.16 | 0.42 | 0.46 | 0.27 | 0.01 | 0.56 | 0.13 | 0.28 |
+
+On Wang et al.'s own measure we are a little below the original baseline, with the same easy and hard findings. On IoU, Grad-CAM++ beats that baseline but sits well below Hermoza et al., whose method is built to localise. Most of that gap is cardiomegaly. Our box is drawn around the hottest 5% of the map, far smaller than an enlarged heart, so the overlap stays low even when the box sits inside the radiologist's. Neither comparison is exactly like for like: Wang et al. can place several boxes on one image and count the extra ones as false positives, while we place one. Our IoU figures come from the per-image scores in `runs/xai/xai_per_image.csv`.
 
 ### Are the explanations faithful to the model
 
@@ -282,13 +303,21 @@ Please check each one against the original before it goes into the paper.
 - Chattopadhay A, et al. Grad-CAM++: Generalized gradient-based visual explanations for deep convolutional networks. WACV 2018.
 - DeGrave AJ, Janizek JD, Lee SI. AI for radiographic COVID-19 detection selects shortcuts over signal. Nature Machine Intelligence, 2021.
 - Huang G, Liu Z, van der Maaten L, Weinberger KQ. Densely connected convolutional networks. CVPR 2017.
-- Learning low-rank feature for thorax disease classification. arXiv:2404.18933, 2024.
+- Goel R, Nath U, Wang Y, Silva AC, Wu T, Yang Y. Learning low-rank feature for thorax disease classification. arXiv:2404.18933, 2024.
+- Guan Q, Huang Y. Multi-label chest X-ray image classification via category-wise residual attention learning. Pattern Recognition Letters, 2020.
+- Guendel S, et al. Learning to recognize abnormalities in chest X-rays with location-aware dense networks. arXiv:1803.04565, 2018.
+- Hermoza R, Maicas G, Nascimento JC, Carneiro G. Region proposals for saliency map refinement for weakly-supervised disease localisation and classification. MICCAI 2020.
+- Kim E, Kim S, Seo M, Yoon S. XProtoNet: Diagnosis in chest radiography with global and local explanations. CVPR 2021.
+- Ma C, Wang H, Hoi SCH. Multi-label thoracic disease image classification with cross-attention networks. MICCAI 2019.
 - Petsiuk V, Das A, Saenko K. RISE: Randomized input sampling for explanation of black-box models. BMVC 2018.
 - Rajpurkar P, et al. CheXNet: Radiologist-level pneumonia detection on chest X-rays with deep learning. arXiv:1711.05225, 2017.
 - Selvaraju RR, et al. Grad-CAM: Visual explanations from deep networks via gradient-based localization. ICCV 2017.
 - Sundararajan M, Taly A, Yan Q. Axiomatic attribution for deep networks. ICML 2017.
 - Wang H, et al. Score-CAM: Score-weighted visual explanations for convolutional neural networks. CVPR Workshops 2020.
 - Wang X, Peng Y, Lu L, Lu Z, Bagheri M, Summers RM. ChestX-ray8: Hospital-scale chest X-ray database and benchmarks on weakly-supervised classification and localization of common thorax diseases. CVPR 2017.
-- Yao L, et al. Learning to diagnose from scratch by exploiting dependencies among labels. arXiv, 2017.
+- Taslimi S, Taslimi S, Fathi N, Salehi M, Rohban MH. SwinCheX: Multi-label classification on chest X-ray images with transformers. arXiv:2206.04246, 2022.
+- Xiao J, Bai Y, Yuille A, Zhou Z. Delving into masked autoencoders for multi-label thorax disease classification. WACV 2023.
+- Yao L, et al. Learning to diagnose from scratch by exploiting dependencies among labels. arXiv:1710.10501, 2017.
+- Yao L, Prosky J, Poblenz E, Covington B, Lyman K. Weakly supervised medical diagnosis and localization from multiple resolutions. arXiv:1803.07703, 2018.
 - Zech JR, et al. Variable generalization performance of a deep learning model to detect pneumonia in chest radiographs: a cross-sectional study. PLOS Medicine, 2018.
 - Zeiler MD, Fergus R. Visualizing and understanding convolutional networks. ECCV 2014.

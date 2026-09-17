@@ -34,8 +34,8 @@ from arc.figstyle import AXIS, INK, INK_2, MUTED, SURFACE, apply_style
 #: vision check even when all pairs are on screen together.
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a"]
 
-#: For context on the test panel: the closest published DenseNet-121 on this split.
-REFERENCE = ("arXiv:2404.18933, DenseNet-121", 0.812)
+#: For context on the test panel: a published DenseNet-121 on the same split (224 px).
+REFERENCE = ("Goel et al. 2024, DenseNet-121", 0.8202)
 
 DEFAULT_RUNS = [
     Path("runs/densenet121_512"),
