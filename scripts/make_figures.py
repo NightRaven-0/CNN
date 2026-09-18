@@ -126,13 +126,15 @@ def published_comparison(run: Path, out: Path) -> None:
             tick.set_color(INK)
             tick.set_fontweight("bold")
     quiet_y(ax)
-    ax.set_xlim(0.72, 0.85)
+    values = [value for _, value, _ in rows]
+    ax.set_xlim(min(0.79, min(values) - 0.01), max(0.845, max(values) + 0.008))
     ax.grid(axis="x")
     ax.set_axisbelow(True)
     ax.set_xlabel(f"mean AUROC on the official NIH test split ({metrics['n_test_images']:,} images)")
-    ax.set_title("Where this run sits among published results")
-    caption(fig, "All published figures used the same official split. CheXNet's often quoted 0.841 is left "
-                 "out on purpose: it was measured on its own random split and is not comparable.")
+    ax.set_title("Where this run sits among results published 2021 to 2025")
+    caption(fig, "All published figures come from papers published 2021 to 2025 and use the same official split. "
+                 "Results on other splits, such as ThoraX-PriorNet's 0.847, are left out because they are not "
+                 "comparable.")
     save(fig, out, "2_published_comparison.png")
 
 

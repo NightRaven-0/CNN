@@ -27,22 +27,21 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 
 from arc.data import IMAGE_COL, LABELS, load_metadata
 
-#: Mean AUROC on the official ChestX-ray14 test split, from the literature, each
-#: checked against the paper's own table. Works that used their own random split,
-#: CheXNet's 0.841 among them, are left out because they are not comparable.
+#: Mean AUROC on the official ChestX-ray14 test split from papers published
+#: 2021 to 2025, each checked against the paper's own table. Works that used their
+#: own random split are left out because they are not comparable: ThoraX-PriorNet
+#: (2024) reports 0.847, but on a random 70/10/20 split.
 PUBLISHED = {
-    "Wang et al. 2017 (ResNet-50, 1024 px)": 0.745,
-    "Yao et al. 2018 (ResNet + DenseNet, 512 px, no pretraining)": 0.761,
-    "Baltruschat et al. 2019 (ResNet-38, 448 px + metadata)": 0.806,
-    "Guendel et al. 2018 (DenseNet-121, 1024 px)": 0.807,
     "Taslimi et al. 2022, SwinCheX (Swin-L, 224 px)": 0.810,
-    "Guan and Huang 2020 (DenseNet-121 with category-wise attention)": 0.816,
-    "Ma et al. 2019 (two DenseNet-121s with cross-attention)": 0.817,
+    "Xiao et al. 2023 (DenseNet-121, MAE on 0.3M X-rays, 224 px)": 0.812,
+    "Statheros et al. 2025, CLARiTy (ViT-S, 512 px)": 0.818,
     "Goel et al. 2024 (DenseNet-121, 224 px)": 0.8202,
-    "Hermoza et al. 2020 (DenseNet-121, 512 px)": 0.821,
     "Kim et al. 2021, XProtoNet (DenseNet-121, 512 px)": 0.822,
     "Goel et al. 2024 (DenseNet-121 + low-rank features, 224 px)": 0.8235,
+    "Statheros et al. 2025 (ConvNeXt V2-B baseline, 512 px)": 0.825,
     "Xiao et al. 2023 (ViT-B, MAE on 0.5M X-rays, 224 px)": 0.830,
+    "Yao et al. 2025, EVA-X (ViT-S, 520k X-rays, 224 px)": 0.833,
+    "Goel et al. 2024 (ViT-B + low-rank features, 224 px)": 0.834,
 }
 
 

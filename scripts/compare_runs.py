@@ -103,7 +103,7 @@ def figure(runs: list[dict], out: Path) -> None:
     finished = [r for r in runs if r["test_mean_auroc"] is not None]
     ys = np.arange(len(finished))
     scores.axvline(REFERENCE[1], color=AXIS, lw=1, zorder=1)
-    scores.annotate(REFERENCE[0], (REFERENCE[1], len(finished) - 0.35), xytext=(-6, 0),
+    scores.annotate(f"{REFERENCE[0]}: {REFERENCE[1]}", (REFERENCE[1], len(finished) - 0.35), xytext=(-6, 0),
                     textcoords="offset points", ha="right", va="center", color=MUTED, fontsize=8)
     for y, (run, colour) in enumerate(zip(finished, SERIES, strict=False)):
         scores.scatter(run["test_mean_auroc"], y, s=80, color=colour, edgecolor=SURFACE,
@@ -114,7 +114,7 @@ def figure(runs: list[dict], out: Path) -> None:
     scores.tick_params(axis="y", length=0)
     scores.spines["left"].set_visible(False)
     scores.set_ylim(-0.6, len(finished) - 0.2)
-    scores.grid(axis="x")
+    # No gridlines here: the reference line would sit on one and read as a double line.
     scores.set_axisbelow(True)
     spread_values = [r["test_mean_auroc"] for r in finished]
     # Wide enough to take in the neighbouring published figures. On a tight axis a
