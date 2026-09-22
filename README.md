@@ -109,7 +109,28 @@ Mean AUROC 0.8158, mean AUPRC 0.2878. Per-class figures with 95% bootstrap inter
 
 Pneumonia scores 0.711 by AUROC and 0.048 by AUPRC. At that prevalence the model is close to useless for it in practice, and a table carrying only AUROC would hide the fact entirely.
 
-The probabilities themselves are not calibrated. Across the eight findings that have boxes, the median true positive scores between 0.24 (Pneumonia) and 0.67 (Pneumothorax), so 0.5 is not a meaningful cut-off, and anyone using the model would need a threshold chosen per finding. Ranking is what it does well: for each finding, the median boxed test case sits between the 75th and 97th percentile of all test images, though individual cases vary widely.
+Ranking is what the model does best: for each finding, the median boxed test case sits between the 75th and 97th percentile of all test images, though individual cases vary widely.
+
+### Calibration and decision cut-offs
+
+The raw scores rank images well but are not probabilities. Training weighted positive cases up, so every finding's scores sat too high, each by a different amount: across the eight findings that have boxes, the median true positive scored anywhere from 0.24 (Pneumonia) to 0.67 (Pneumothorax), and 0.5 was not a meaningful cut-off. `scripts/calibrate.py` repairs this after training, using only the 8,197 validation images. It fits Platt scaling for each finding, which leaves AUROC unchanged, then picks a cut-off for each finding on validation and applies it once to the test set.
+
+Calibration error on the test set fell from 0.117 to 0.011 (mean over the 14 findings), and the average predicted probability now matches how common each finding is. For pneumonia it went from 0.165 to 0.020, against a true rate of 0.022.
+
+With the cut-off that gave the best F1 on validation:
+
+| finding | cut-off | precision | recall | specificity | F1 |
+|---|---|---|---|---|---|
+| Effusion | 0.28 | 0.48 | 0.59 | 0.85 | 0.53 |
+| Emphysema | 0.14 | 0.45 | 0.61 | 0.97 | 0.52 |
+| Pneumothorax | 0.20 | 0.44 | 0.55 | 0.92 | 0.49 |
+| Infiltration | 0.22 | 0.35 | 0.72 | 0.58 | 0.47 |
+| Cardiomegaly | 0.13 | 0.34 | 0.46 | 0.96 | 0.39 |
+| Nodule | 0.14 | 0.22 | 0.42 | 0.90 | 0.29 |
+| Pneumonia | 0.03 | 0.05 | 0.43 | 0.81 | 0.09 |
+| mean of 14 | | 0.32 | 0.46 | 0.89 | 0.35 |
+
+Flagging every image would give a mean F1 of 0.13, so the model is well above that, but these are not clinical numbers. Set to catch 90% of cases instead, it reaches a mean recall of 0.93 on the test set at a specificity of only 0.43, which means far too many false alarms for screening. Accuracy, 0.87, stays below the 0.92 you would get by always answering "no", which is why accuracy is not a useful measure on this dataset. The cut-offs for rare findings rest on few validation cases (Hernia has 16), and Hernia's 90% cut-off caught only 78% of its test cases. All the numbers are in `runs/densenet121_512/test_threshold_metrics.csv` and `calibration_metrics.csv`.
 
 ### Run to run variation
 
@@ -200,7 +221,6 @@ A heatmap shows where the model looked. It doesn't show whether the model reason
 ## Later, after the first results
 
 - Evaluating Score-CAM, Integrated Gradients and occlusion, which are written but not yet scored
-- Calibrating the probabilities on the validation set, for example with temperature scaling, and choosing a threshold for each finding
 - Explanations built into the model itself, either with an attention-pooling head or with a prototype network that says "this region looks like these training cases"
 - A test set from a second hospital, such as VinDr-CXR or CheXlocalize
 - A newer backbone such as ConvNeXt, and higher resolution
@@ -215,7 +235,7 @@ A heatmap shows where the model looked. It doesn't show whether the model reason
 
 ## Where the code stands
 
-Written and tested (40 tests passing), and run end to end:
+Written and tested (44 tests passing), and run end to end:
 
 - data splitting by patient, with a check that fails loudly if a patient ever lands in two splits
 - loading of the NIH labels, the official split and the boxes, checked against the real files
@@ -223,6 +243,7 @@ Written and tested (40 tests passing), and run end to end:
 - seven explanation methods in code, four of them evaluated, and the scoring that grades them against the boxes
 - scripts that download, preprocess, train, and produce the three results tables: classification scores, localisation against the boxes, and faithfulness alongside the sanity check
 - a script that draws the review figures, a check on how far box scores can judge nodules at this resolution, a comparison across repeated runs, and a tool that runs the model on a single X-ray and saves its explanation
+- calibration of the scores and a decision cut-off for each finding, both fitted on validation data only
 
 Measured on this machine: training at batch size 32 on 512 px images used about 12 GB of the GPU's 16 GB. The first epoch took 10.4 minutes while cuDNN tuned its kernels and the rest about 7.5 each, and early stopping ended the run after 7 epochs, about 55 minutes in all. Training saves a resumable checkpoint after every epoch. That was added after three power cuts during the data download, and was tested by interrupting a run on purpose.
 
@@ -239,6 +260,7 @@ uv run python scripts/evaluate.py --run runs/densenet121_512
 uv run python scripts/evaluate_xai.py --checkpoint runs/densenet121_512/best.pt
 uv run python scripts/evaluate_faithfulness.py --checkpoint runs/densenet121_512/best.pt --randomisation-samples 8
 uv run python scripts/check_nodule_resolution.py
+uv run python scripts/calibrate.py
 uv run python scripts/make_figures.py
 ```
 
