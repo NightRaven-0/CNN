@@ -17,7 +17,7 @@ The priorities, in order:
 
 ## Dataset: NIH ChestX-ray14
 
-112,120 frontal chest X-rays from 30,805 patients, released by the NIH Clinical Center. Each image has up to 14 disease labels, or "No Finding". The images are 1024×1024 PNG files, about 45 GB in total.
+112,120 frontal chest X-rays from 30,805 patients, released by the NIH Clinical Center. Each image has up to 14 disease labels, or "No Finding". The images are 1024Ã—1024 PNG files, about 45 GB in total.
 
 We picked it for three reasons.
 
@@ -35,7 +35,7 @@ Our first plan used VinDr-CXR, which has cleaner labels and many more boxes. We 
 
 DenseNet-121 pretrained on ImageNet, with 14 sigmoid outputs, one per disease. It is still the most common CNN in recent work on this dataset, from XProtoNet (2021) to Goel et al. (2024), so the numbers are easy to place.
 
-One change from the more common setup: we train on 512×512 images instead of 224×224. The explanation maps come from the last convolutional layer, which is a 7×7 grid at 224 and a 16×16 grid at 512. A 7×7 grid is too coarse to point at a nodule, and the results show that even 16×16 is too coarse for box-overlap scores to judge nodules fairly. The larger size costs about five times the compute per image, and our GPU (RTX 5070 Ti, 16 GB) can handle it.
+One change from the more common setup: we train on 512Ã—512 images instead of 224Ã—224. The explanation maps come from the last convolutional layer, which is a 7Ã—7 grid at 224 and a 16Ã—16 grid at 512. A 7Ã—7 grid is too coarse to point at a nodule, and the results show that even 16Ã—16 is too coarse for box-overlap scores to judge nodules fairly. The larger size costs about five times the compute per image, and our GPU (RTX 5070 Ti, 16 GB) can handle it.
 
 Class imbalance is handled with a weighted loss. Hernia, for example, appears in well under 1% of images.
 
@@ -199,7 +199,7 @@ At IoU above 0.5 our Grad-CAM++ boxes are level with PCAN and below the other th
 |---|---|---|
 | NIH ChestX-ray14 over VinDr-CXR | Official split, many published baselines, no access paperwork | Noisier labels, far fewer boxes |
 | DenseNet-121 | Direct comparison with recent DenseNet-121 work | Not the strongest backbone around today |
-| 512 px input | 16×16 explanation maps instead of 7×7, and a higher score: 0.8158 against 0.8025 at 224 px with the same recipe and seed | About 5 times the compute per image, and a departure from the more common 224 |
+| 512 px input | 16Ã—16 explanation maps instead of 7Ã—7, and a higher score: 0.8158 against 0.8025 at 224 px with the same recipe and seed | About 5 times the compute per image, and a departure from the more common 224 |
 | Four explanation methods plus a random control | Agreement between methods becomes evidence, and one weak method can't sink the result | More compute, and more to explain in the paper |
 | Post-hoc explanations first | Works on any trained model, and matches most published work | The explanation is worked out afterwards, not built into the model |
 | Official split only | Our numbers line up with the literature | No freedom to pick a friendlier split, which is the whole reason for using it |
@@ -251,7 +251,12 @@ Measured on this machine: training at batch size 32 on 512 px images used about 
 
 ## Reproducing the results
 
-Everything runs from the project root. The environment is defined in `pyproject.toml`, and `uv` builds it with the PyTorch build this GPU needs.
+Everything runs from the project root. The environment is defined in `pyproject.toml` and `requirements.txt`.
+**Python version:** 3.12 (required)
+
+With `uv` (recommended), it automatically picks the PyTorch build this GPU needs (CUDA 12.8 for RTX 5070 Ti).
+
+**With `uv` (recommended):**
 
 ```bash
 uv sync --extra dev
@@ -282,6 +287,28 @@ To check what input size does to accuracy, train the same recipe at 224 px:
 uv run python scripts/train.py --size 224 --out runs/densenet121_224
 uv run python scripts/evaluate.py --run runs/densenet121_224
 ```
+
+**With `pip` (alternative):**
+
+**Requirements:** Python 3.12
+
+Install from `requirements.txt`:
+
+```bash
+pip install -r requirements.txt
+# Or with dev dependencies:
+pip install -r requirements-dev.txt
+```
+
+Note: PyTorch wheels for RTX 5070 Ti (CUDA 12.8, sm_120) require the custom index:
+
+```bash
+pip install --index-url https://download.pytorch.org/whl/cu128 -r requirements.txt
+```
+
+Then run scripts with `python` instead of `uv run python`.
+
+**Execution times:**
 
 The download is 45 GB and took about nine hours on a 1.4 MB/s connection; it picks up where it stopped if interrupted. Preprocessing takes about five minutes, training about an hour, and the evaluations another half hour.
 
