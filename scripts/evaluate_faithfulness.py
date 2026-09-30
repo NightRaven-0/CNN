@@ -59,7 +59,9 @@ def main() -> int:
     parser.add_argument("--size", type=int, default=512)
     parser.add_argument("--samples", type=int, default=50, help="images for deletion/insertion")
     parser.add_argument("--steps", type=int, default=20)
-    parser.add_argument("--randomisation-samples", type=int, default=4)
+    # 8 is the setting behind the reported table, so run_pipeline.py, which
+    # leaves this at its default, reproduces it.
+    parser.add_argument("--randomisation-samples", type=int, default=8)
     parser.add_argument("--skip-randomisation", action="store_true")
     parser.add_argument("--seed", type=int, default=1337)
     args = parser.parse_args()

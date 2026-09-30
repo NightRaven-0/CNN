@@ -1,13 +1,17 @@
 """Explanation methods, and the sanity check that decides whether to trust them.
 
-Six methods, chosen because they fail in different ways:
+Seven methods and a control, chosen because they fail in different ways. The
+first four are the ones evaluated so far; the next three are written but not
+yet scored:
 
 * ``cam``        the exact decomposition this architecture allows, from :meth:`DenseNet121Classifier.cam`
 * ``gradcam``    and ``gradcam++``, the usual choice in medical imaging papers
+* ``eigencam``   the activations' first principal component: no gradients, same map for every finding
 * ``scorecam``   gradient free, so it cannot be fooled by gradient saturation
 * ``ig``         Integrated Gradients, pixel level rather than 16x16
 * ``occlusion``  blanks patches and watches the score, measuring the model's own reaction
-* ``random``     a control. Any metric that rates this well is too easy to pass.
+* ``random``     the control: random weights on the model's own feature maps. Any metric that
+  rates this well is too easy to pass.
 
 Integrated Gradients and occlusion are written out here rather than pulled from
 a library: both are short, and owning the baseline choice matters, since for a

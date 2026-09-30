@@ -17,7 +17,7 @@ The priorities, in order:
 
 ## Dataset: NIH ChestX-ray14
 
-112,120 frontal chest X-rays from 30,805 patients, released by the NIH Clinical Center. Each image has up to 14 disease labels, or "No Finding". The images are 1024Ã—1024 PNG files, about 45 GB in total.
+112,120 frontal chest X-rays from 30,805 patients, released by the NIH Clinical Center. Each image has up to 14 disease labels, or "No Finding". The images are 1024×1024 PNG files, about 45 GB in total.
 
 We picked it for three reasons.
 
@@ -35,7 +35,7 @@ Our first plan used VinDr-CXR, which has cleaner labels and many more boxes. We 
 
 DenseNet-121 pretrained on ImageNet, with 14 sigmoid outputs, one per disease. It is still the most common CNN in recent work on this dataset, from XProtoNet (2021) to Goel et al. (2024), so the numbers are easy to place.
 
-One change from the more common setup: we train on 512Ã—512 images instead of 224Ã—224. The explanation maps come from the last convolutional layer, which is a 7Ã—7 grid at 224 and a 16Ã—16 grid at 512. A 7Ã—7 grid is too coarse to point at a nodule, and the results show that even 16Ã—16 is too coarse for box-overlap scores to judge nodules fairly. The larger size costs about five times the compute per image, and our GPU (RTX 5070 Ti, 16 GB) can handle it.
+One change from the more common setup: we train on 512×512 images instead of 224×224. The explanation maps come from the last convolutional layer, which is a 7×7 grid at 224 and a 16×16 grid at 512. A 7×7 grid is too coarse to point at a nodule, and the results show that even 16×16 is too coarse for box-overlap scores to judge nodules fairly. The larger size costs about five times the compute per image, and our GPU (RTX 5070 Ti, 16 GB) can handle it.
 
 Class imbalance is handled with a weighted loss. Hernia, for example, appears in well under 1% of images.
 
@@ -46,7 +46,7 @@ This is the main part of the project. Four explanation methods were evaluated on
 - CAM, the original class activation map. For this architecture it adds up exactly to the model's prediction, so it is a decomposition of the answer rather than an estimate of it, and it costs nothing extra to compute.
 - Grad-CAM and Grad-CAM++, gradient-weighted activation maps and the usual choice in medical imaging papers
 - EigenCAM, which takes the main component of the last layer's activations. It uses no gradients and ignores which finding is being explained, so it shows the same region whatever the question.
-- A random map, as a control. Any score a random map also earns is not evidence of anything, and we would rather find that out ourselves than have a reviewer find it.
+- A random map, as a control. It is the same machinery with random weights on the model's own feature maps, so it keeps the image's structure but knows nothing about the finding. Any score a random map also earns is not evidence of anything, and we would rather find that out ourselves than have a reviewer find it.
 
 Three more methods are in the code but have not been evaluated: Score-CAM, Integrated Gradients and occlusion. Integrated Gradients and occlusion have unit tests. Score-CAM needs one forward pass per channel, 1024 of them for this network, and the other two work pixel by pixel instead of on the 16 by 16 grid, so all three need a slower evaluation path. They are listed under later work, not reported as results.
 
@@ -56,11 +56,11 @@ Each method is scored three ways.
 
 *Does it point at the right place?* We use the pointing game (does the hottest spot on the map fall inside a radiologist's box) and the overlap (IoU) between the map and the box.
 
-*Is it faithful to the model?* We use deletion and insertion curves (Petsiuk et al., 2018). Remove the pixels the map ranks as most important and see how quickly the prediction falls. A good ranking should make it fall fast.
+*Is it faithful to the model?* We use deletion and insertion curves. Remove the pixels the map ranks as most important and see how quickly the prediction falls. A good ranking should make it fall fast.
 
-*Does it depend on the model at all?* We use the model-randomisation test from Adebayo et al. (2018). Randomise the network's weights layer by layer and check whether the maps change. If they stay the same, the method was tracing edges in the image and wasn't explaining the model.
+*Does it depend on the model at all?* We use a model-randomisation test. Randomise the network's weights layer by layer and check whether the maps change. If they stay the same, the method was tracing edges in the image and wasn't explaining the model.
 
-We do all this because heatmaps in medical imaging are often less reliable than they look. Arun et al. (2021) tested eight saliency methods on chest X-ray localisation. All eight failed at least one of their trust tests, and all eight localised worse than models trained specifically for it (a U-Net and a RetinaNet). DeGrave et al. (2021) showed COVID-19 classifiers leaning on shortcuts such as text markers and patient positioning rather than on the lungs. A heatmap on its own proves very little. What we're adding is the measurement.
+We do all this because heatmaps in medical imaging are often less reliable than they look. Arun et al. (2021) tested eight saliency methods on chest X-ray localisation. All eight failed at least one of their trust tests, and all eight localised worse than models trained specifically for it (a U-Net and a RetinaNet). DeGrave et al. (2021) showed COVID-19 classifiers leaning on shortcuts such as text markers and patient positioning rather than on the lungs. Saporta et al. (2022) compared seven saliency methods, Grad-CAM among them, with radiologists: all seven localised significantly worse, and the gap was widest for small findings. A heatmap on its own proves very little. What we're adding is the measurement.
 
 ## Localisation
 
@@ -117,7 +117,7 @@ Ranking is what the model does best: for each finding, the median boxed test cas
 
 The raw scores rank images well but are not probabilities. Training weighted positive cases up, so every finding's scores sat too high, each by a different amount: across the eight findings that have boxes, the median true positive scored anywhere from 0.24 (Pneumonia) to 0.67 (Pneumothorax), and 0.5 was not a meaningful cut-off. `scripts/calibrate.py` repairs this after training, using only the 8,197 validation images. It fits Platt scaling for each finding, which leaves AUROC unchanged, then picks a cut-off for each finding on validation and applies it once to the test set.
 
-Calibration error on the test set fell from 0.117 to 0.011 (mean over the 14 findings), and the average predicted probability now matches how common each finding is. For pneumonia it went from 0.165 to 0.020, against a true rate of 0.022.
+Calibration error on the test set fell from 0.117 to 0.011 (mean over the 14 findings), and the average predicted probability now matches how common each finding is. For pneumonia it went from 0.165 to 0.019, against a true rate of 0.022.
 
 With the cut-off that gave the best F1 on validation:
 
@@ -171,7 +171,7 @@ The spread between findings is far wider than the spread between methods:
 | Cardiomegaly | 0.870 | 0.815 | 0.349 |
 | Nodule | 0.203 | 0.000 | 0.114 |
 
-Cardiomegaly, which is large and sits in the same place every time, is localised well by everything. Pneumothorax is the clearest failure. With Grad-CAM++, the best localiser overall, its pointing score is 0.22, the lowest of any finding for that method: most of its maps point somewhere other than the radiologist's box.
+Cardiomegaly, which is large and sits in the same place every time, is localised well by everything. Pneumothorax is the clearest failure. With Grad-CAM++, the best localiser overall, its pointing score is 0.22, the lowest of any finding for that method: most of its maps point somewhere other than the radiologist's box. Chest drains, the tubes used to treat pneumothorax, are a known shortcut for it, and Jiménez-Sánchez et al. (2023) shared drain labels for a subset of pneumothorax images, so whether the maps land on drains is the first thing to check.
 
 Nodules score almost as low, but for them the scores are the problem. The median nodule box is 70 by 68 pixels, about one cell of the 16 by 16 grid the explanations are computed on, while the next smallest finding, masses, has boxes three times that area. A box drawn from any map ends up around twelve times the size of the nodule, which caps IoU and T(IoBB) however well the map is placed. For all four methods, in every one of the 79 nodule cases, no placement of that box could have reached T(IoBB) 0.5, so the zero in that column says nothing about the explanations.
 
@@ -199,7 +199,7 @@ At IoU above 0.5 our Grad-CAM++ boxes are level with PCAN and below the other th
 |---|---|---|
 | NIH ChestX-ray14 over VinDr-CXR | Official split, many published baselines, no access paperwork | Noisier labels, far fewer boxes |
 | DenseNet-121 | Direct comparison with recent DenseNet-121 work | Not the strongest backbone around today |
-| 512 px input | 16Ã—16 explanation maps instead of 7Ã—7, and a higher score: 0.8158 against 0.8025 at 224 px with the same recipe and seed | About 5 times the compute per image, and a departure from the more common 224 |
+| 512 px input | 16×16 explanation maps instead of 7×7, and a higher score: 0.8158 against 0.8025 at 224 px with the same recipe and seed | About 5 times the compute per image, and a departure from the more common 224 |
 | Four explanation methods plus a random control | Agreement between methods becomes evidence, and one weak method can't sink the result | More compute, and more to explain in the paper |
 | Post-hoc explanations first | Works on any trained model, and matches most published work | The explanation is worked out afterwards, not built into the model |
 | Official split only | Our numbers line up with the literature | No freedom to pick a friendlier split, which is the whole reason for using it |
@@ -216,16 +216,31 @@ Explanation scores exist only for the 8 classes that have boxes.
 
 The explanation maps are 16 by 16, coarser than a nodule, so box-overlap scores cannot judge localisation for findings that small. The nodule results use a containment check instead, which we defined for this purpose and which has not been validated anywhere else.
 
-All the data is from one hospital, so we have no evidence yet that the model works elsewhere. Zech et al. (2018) showed that chest X-ray models can lose a lot of accuracy at a new hospital.
+All the data is from one hospital, so we have no evidence yet that the model works elsewhere. DeGrave et al. (2021) found chest X-ray models that looked accurate failing when they were tested at new hospitals.
+
+One of the four test images drawn at random for the review puts the model's evidence for Infiltration on the left shoulder, around the side marker and outside the lungs. That is the kind of shortcut DeGrave et al. describe. One image proves nothing, and measuring it over the whole test set is the first item under *What comes next*.
 
 A heatmap shows where the model looked. It doesn't show whether the model reasoned the way a radiologist would. None of this is clinical validation, and the system isn't meant for diagnosis.
 
-## Later, after the first results
+## What comes next
 
-- Evaluating Score-CAM, Integrated Gradients and occlusion, which are written but not yet scored
-- Explanations built into the model itself, either with an attention-pooling head or with a prototype network that says "this region looks like these training cases"
-- A test set from a second hospital, such as VinDr-CXR or CheXlocalize
-- A newer backbone such as ConvNeXt, and higher resolution
+Calibration and the decision cut-offs are done. The rest, in the order we would do it:
+
+Now, with what we have:
+
+- Measure the possible shortcut: how much of each map falls outside the chest or on the image border, over all 25,596 test images, against a random map
+- Score Score-CAM, Integrated Gradients and occlusion, which are written but not yet scored, through the same three tests
+
+Next, to make the results hold up:
+
+- A second hospital: the frozen model and every method on VinDr-CXR, or on CheXlocalize, the radiologist annotations from Saporta et al. (2022)
+- Finer maps for nodules, from the 32 by 32 grid of dense block 3 or a larger input, then the nodule check again
+- A closer look at pneumothorax, checking whether its maps land on chest drains
+
+Later, bigger changes:
+
+- Explanations built into the model itself, either with an attention-pooling head or with a prototype network that says "this region looks like these training cases", judged by the same three tests
+- A better training recipe first, to close the gap to the best DenseNet-121 result (0.822), then a transformer pretrained on chest X-rays (0.830 to 0.834 in recent work)
 - A radiologist rating a sample of the explanations
 
 ## Questions for our mentor
@@ -251,12 +266,7 @@ Measured on this machine: training at batch size 32 on 512 px images used about 
 
 ## Reproducing the results
 
-Everything runs from the project root. The environment is defined in `pyproject.toml` and `requirements.txt`.
-**Python version:** 3.12 (required)
-
-With `uv` (recommended), it automatically picks the PyTorch build this GPU needs (CUDA 12.8 for RTX 5070 Ti).
-
-**With `uv` (recommended):**
+Everything runs from the project root, on Python 3.12. The environment is defined in `pyproject.toml`, and `uv` builds it with the PyTorch build this GPU needs (CUDA 12.8, for the RTX 5070 Ti):
 
 ```bash
 uv sync --extra dev
@@ -288,27 +298,14 @@ uv run python scripts/train.py --size 224 --out runs/densenet121_224
 uv run python scripts/evaluate.py --run runs/densenet121_224
 ```
 
-**With `pip` (alternative):**
-
-**Requirements:** Python 3.12
-
-Install from `requirements.txt`:
+Without `uv`, `requirements.txt` lists the same packages for pip, and `requirements-dev.txt` adds the test runner and linter. Install PyTorch from its CUDA 12.8 index first, because the default Windows wheels on PyPI have no CUDA support, then the rest. After that, run each script with `python` in place of `uv run python`:
 
 ```bash
-pip install -r requirements.txt
-# Or with dev dependencies:
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 pip install -r requirements-dev.txt
 ```
 
-Note: PyTorch wheels for RTX 5070 Ti (CUDA 12.8, sm_120) require the custom index:
-
-```bash
-pip install --index-url https://download.pytorch.org/whl/cu128 -r requirements.txt
-```
-
-Then run scripts with `python` instead of `uv run python`.
-
-**Execution times:**
+`scripts/run_pipeline.py` chains preprocessing, training and the three evaluations unattended, skipping any step whose output already exists. `scripts/supervise_download.py` restarts the download whenever it stops.
 
 The download is 45 GB and took about nine hours on a 1.4 MB/s connection; it picks up where it stopped if interrupted. Preprocessing takes about five minutes, training about an hour, and the evaluations another half hour.
 
@@ -319,30 +316,26 @@ uv run python scripts/predict.py data/processed/nih512/00021181_002.png
 uv run python scripts/predict.py data/processed/nih512/00025662_006.png --finding Nodule --method gradcam++
 ```
 
-It prints all 14 findings ranked by probability and saves a picture to `runs/predictions/`, with the radiologist's box drawn when the image has one. It warns if the image was used in training.
+It prints all 14 findings ranked by the model's raw score and saves a picture to `runs/predictions/`, with the radiologist's box drawn when the image has one. It warns if the image was used in training. The raw scores are not calibrated, so read them as a ranking, not as probabilities; see *Calibration and decision cut-offs*.
 
 ## References
 
-Please check each one against the original before it goes into the paper.
+The same list as the last slide of the review deck. Every paper is from 2021 to 2025. The one exception is the dataset paper, which NIH asks every user of the data to cite. Methods named above without a citation, such as Grad-CAM, date from before 2021. Their original papers belong in the paper's own reference list, not in this comparison. Please check each entry against the original before it goes into the paper.
 
-- Adebayo J, Gilmer J, Muelly M, Goodfellow I, Hardt M, Kim B. Sanity checks for saliency maps. NeurIPS 2018.
-- Arun N, et al. Assessing the trustworthiness of saliency maps for localizing abnormalities in medical imaging. Radiology: Artificial Intelligence, 2021.
-- Chattopadhay A, et al. Grad-CAM++: Generalized gradient-based visual explanations for deep convolutional networks. WACV 2018.
-- DeGrave AJ, Janizek JD, Lee SI. AI for radiographic COVID-19 detection selects shortcuts over signal. Nature Machine Intelligence, 2021.
-- Goel R, Nath U, Wang Y, Silva AC, Wu T, Yang Y. Learning low-rank feature for thorax disease classification. arXiv:2404.18933, 2024.
-- Hossain MI, Zunaed M, Ahmed MK, Hossain SMJ, Hasan A, Hasan T. ThoraX-PriorNet: A novel attention-based architecture using anatomical prior probability maps for thoracic disease classification. IEEE Access, 2024.
-- Huang G, Liu Z, van der Maaten L, Weinberger KQ. Densely connected convolutional networks. CVPR 2017.
-- Kim E, Kim S, Seo M, Yoon S. XProtoNet: Diagnosis in chest radiography with global and local explanations. CVPR 2021.
-- Li et al. Modeling long-range dependencies for weakly supervised disease classification and localization on chest X-ray. Quantitative Imaging in Medicine and Surgery, 2022.
-- Petsiuk V, Das A, Saenko K. RISE: Randomized input sampling for explanation of black-box models. BMVC 2018.
-- Selvaraju RR, et al. Grad-CAM: Visual explanations from deep networks via gradient-based localization. ICCV 2017.
-- Statheros JM, Wang H, Klein R. CLARiTy: A vision transformer for multi-label classification and weakly-supervised localization of chest X-ray pathologies. arXiv:2512.16700, 2025.
-- Sundararajan M, Taly A, Yan Q. Axiomatic attribution for deep networks. ICML 2017.
-- Taslimi S, Taslimi S, Fathi N, Salehi M, Rohban MH. SwinCheX: Multi-label classification on chest X-ray images with transformers. arXiv:2206.04246, 2022.
-- Wang H, et al. Score-CAM: Score-weighted visual explanations for convolutional neural networks. CVPR Workshops 2020.
-- Wang X, Peng Y, Lu L, Lu Z, Bagheri M, Summers RM. ChestX-ray8: Hospital-scale chest X-ray database and benchmarks on weakly-supervised classification and localization of common thorax diseases. CVPR 2017. (The dataset paper, which NIH asks every user to cite.)
-- Xiao J, Bai Y, Yuille A, Zhou Z. Delving into masked autoencoders for multi-label thorax disease classification. WACV 2023.
-- Yao J, Wang X, Song Y, Zhao H, Ma J, Chen Y, Liu W, Wang B. EVA-X: A foundation model for general chest X-ray analysis with self-supervised learning. npj Digital Medicine, 2025.
-- Zech JR, et al. Variable generalization performance of a deep learning model to detect pneumonia in chest radiographs: a cross-sectional study. PLOS Medicine, 2018.
-- Zeiler MD, Fergus R. Visualizing and understanding convolutional networks. ECCV 2014.
-- Zhu X, Pang S, Zhang X, Huang J, Zhao L, Tang K, Feng Q. PCAN: Pixel-wise classification and attention network for thoracic disease classification and weakly supervised localization. Computerized Medical Imaging and Graphics, 2022.
+- Kim E, Kim S, Seo M, Yoon S. XProtoNet: Diagnosis in chest radiography with global and local explanations. CVPR 2021. [arxiv.org/abs/2103.10663](https://arxiv.org/abs/2103.10663)
+- Arun N, et al. Assessing the trustworthiness of saliency maps for localizing abnormalities in medical imaging. Radiology: Artificial Intelligence, 2021. [doi.org/10.1148/ryai.2021200267](https://doi.org/10.1148/ryai.2021200267)
+- DeGrave AJ, Janizek JD, Lee SI. AI for radiographic COVID-19 detection selects shortcuts over signal. Nature Machine Intelligence, 2021. [doi.org/10.1038/s42256-021-00338-7](https://doi.org/10.1038/s42256-021-00338-7)
+- Taslimi S, Taslimi S, Fathi N, Salehi M, Rohban MH. SwinCheX: Multi-label classification on chest X-ray images with transformers. arXiv:2206.04246, 2022. [arxiv.org/abs/2206.04246](https://arxiv.org/abs/2206.04246)
+- Saporta A, Gui X, Agrawal A, Pareek A, Truong SQH, Nguyen CDT, Ngo VD, Seekins J, Blankenberg FG, Ng AY, Lungren MP, Rajpurkar P. Benchmarking saliency methods for chest X-ray interpretation. Nature Machine Intelligence 4:867–878, 2022. [doi.org/10.1038/s42256-022-00536-x](https://doi.org/10.1038/s42256-022-00536-x)
+- Li et al. Modeling long-range dependencies for weakly supervised disease classification and localization on chest X-ray. Quantitative Imaging in Medicine and Surgery, 2022. [pmc.ncbi.nlm.nih.gov/articles/PMC9131331](https://pmc.ncbi.nlm.nih.gov/articles/PMC9131331/)
+- Zhu X, Pang S, Zhang X, Huang J, Zhao L, Tang K, Feng Q. PCAN: Pixel-wise classification and attention network for thoracic disease classification and weakly supervised localization. Computerized Medical Imaging and Graphics, 2022. [doi.org/10.1016/j.compmedimag.2022.102137](https://doi.org/10.1016/j.compmedimag.2022.102137)
+- Xiao J, Bai Y, Yuille A, Zhou Z. Delving into masked autoencoders for multi-label thorax disease classification. WACV 2023. [arxiv.org/abs/2210.12843](https://arxiv.org/abs/2210.12843)
+- Jiménez-Sánchez A, Juodelyte D, Chamberlain B, Cheplygina V. Detecting shortcuts in medical images: a case study in chest X-rays. ISBI 2023. [arxiv.org/abs/2211.04279](https://arxiv.org/abs/2211.04279)
+- Goel R, Nath U, Wang Y, Silva AC, Wu T, Yang Y. Learning low-rank feature for thorax disease classification. arXiv:2404.18933, 2024. [arxiv.org/abs/2404.18933](https://arxiv.org/abs/2404.18933)
+- Hossain MI, Zunaed M, Ahmed MK, Hossain SMJ, Hasan A, Hasan T. ThoraX-PriorNet: A novel attention-based architecture using anatomical prior probability maps for thoracic disease classification. IEEE Access, 2024. [arxiv.org/abs/2210.02998](https://arxiv.org/abs/2210.02998)
+- Yao J, Wang X, Song Y, Zhao H, Ma J, Chen Y, Liu W, Wang B. EVA-X: A foundation model for general chest X-ray analysis with self-supervised learning. npj Digital Medicine, 2025. [doi.org/10.1038/s41746-025-02032-z](https://doi.org/10.1038/s41746-025-02032-z)
+- Statheros JM, Wang H, Klein R. CLARiTy: A vision transformer for multi-label classification and weakly-supervised localization of chest X-ray pathologies. arXiv:2512.16700, 2025. [arxiv.org/abs/2512.16700](https://arxiv.org/abs/2512.16700)
+
+Dataset, required by NIH:
+
+- Wang X, Peng Y, Lu L, Lu Z, Bagheri M, Summers RM. ChestX-ray8: Hospital-scale chest X-ray database and benchmarks on weakly-supervised classification and localization of common thorax diseases. CVPR 2017. [arxiv.org/abs/1705.02315](https://arxiv.org/abs/1705.02315)

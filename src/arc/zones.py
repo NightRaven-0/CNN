@@ -95,7 +95,7 @@ DIFFUSE_FINDINGS: frozenset[str] = frozenset(
 NO_FINDING_LABELS: frozenset[str] = frozenset({"No Finding", "No finding"})
 
 #: Spellings that differ between a dataset's label file and its box file.
-#: The NIH box list is reported to use "Infiltrate" where the label file says
+#: The NIH box list uses "Infiltrate" for 123 boxes where the label file says
 #: "Infiltration". Anything else that disagrees is caught by
 #: :func:`validate_against_labels` on first load.
 LABEL_ALIASES: dict[str, str] = {"Infiltrate": "Infiltration"}

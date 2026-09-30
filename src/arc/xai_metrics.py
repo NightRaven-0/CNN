@@ -111,10 +111,10 @@ def iou(pred: Box, truth: Box) -> float:
 def iobb(pred: Box, truth: Box) -> float:
     """Intersection over the predicted box's own area.
 
-    Wang et al. report localisation accuracy at T(IoBB) thresholds. Their exact
-    convention needs checking against the paper before our numbers are put
-    beside theirs; this implementation divides by the predicted box, which
-    rewards a small box inside a large finding and is the more forgiving reading.
+    This is the IoBB of Wang et al. (2017), who report localisation accuracy at
+    T(IoBB) thresholds: the overlap divided by the area of the detected box, not
+    by the union. It rewards a small box inside a large finding, so it is more
+    forgiving than IoU.
     """
     return _intersection(pred, truth) / (pred[2] * pred[3]) if pred[2] * pred[3] > 0 else 0.0
 

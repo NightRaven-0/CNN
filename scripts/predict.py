@@ -1,8 +1,9 @@
 """Run the trained model on one chest X-ray and show what it looked at.
 
-Prints all 14 findings ranked by probability, then saves a picture of the X-ray
-with an explanation heatmap for the top finding, or for one you name, laid over
-it. When the image comes from the NIH release and a radiologist drew a box for
+Prints all 14 findings ranked by the model's raw score, then saves a picture of
+the X-ray with an explanation heatmap for the top finding, or for one you name,
+laid over it. The raw scores rank images well but are not calibrated
+probabilities; scripts/calibrate.py fits the calibration. When the image comes from the NIH release and a radiologist drew a box for
 that finding, the box is drawn as well, so the two can be compared directly.
 
 This is a research prototype trained on one public dataset from one hospital.
