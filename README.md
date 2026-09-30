@@ -2,7 +2,6 @@
 
 Name: ARC-CXR, for audited radiograph classification. It is the `arc` package under `src/`, and the audit is the point of the project.
 Full title, as submitted: *ARC-CXR: audited explanations for multi-label chest X-ray classification and weakly-supervised localisation*
-Capstone Phase 1 forms: what to write on each sheet is in [`docs/capstone_phase1_forms.md`](docs/capstone_phase1_forms.md)
 Prepared by: group 132
 For: Dr. Raghvendra Mishra
 Status: trained and evaluated, results below
